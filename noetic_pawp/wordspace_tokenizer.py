@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from .concept_normalizer import ConceptNormalizer
 
-from .align import align_subwords_to_ipa
+from .ipa_encoder import align_text_ipa, ipa_to_ids, text_to_ipa
 from .config import PAWPConfig, PAWPToken
 from .tokenizer import PAWPTokenizer
 
@@ -31,13 +31,8 @@ class WordSpaceTokenizer:
     ) -> None:
         self.tokenizer = tokenizer or PAWPTokenizer(config=config)
         self.config = self.tokenizer.config
-        self._ipa_vocab: Dict[str, int] = {"<pad>": 0, "<unk>": 1}
         self.concept_normalizer = concept_normalizer or ConceptNormalizer()
 
-    def _next_ipa_id(self, ipa_unit: str) -> int:
-        if ipa_unit not in self._ipa_vocab:
-            self._ipa_vocab[ipa_unit] = len(self._ipa_vocab)
-        return self._ipa_vocab[ipa_unit]
 
     def _split_word_offsets(self, text: str) -> List[Tuple[str, int, int]]:
         return [(m.group(0), m.start(), m.end()) for m in re.finditer(r"[\wÀ-ÿ]+", text, flags=re.UNICODE)]
@@ -82,8 +77,9 @@ class WordSpaceTokenizer:
         concept_ids: Optional[List[Optional[str]]] = [] if self.config.feature_flags.enable_associative_memory else None
 
         for analysis, (_, start, end) in zip(analyses, words):
-            ipa_units = list(analysis.ipa)
-            spans = align_subwords_to_ipa(analysis.pieces, ipa_units)
+            ipa_sequence = text_to_ipa(analysis.original_word, language=language)
+            ipa_units = [ch for ch in ipa_sequence if not ch.isspace()]
+            spans = align_text_ipa(analysis.pieces, ipa_sequence)
             piece_offsets = self._piece_offsets(start, analysis.pieces, end - start)
 
             for idx, piece in enumerate(analysis.pieces):
@@ -93,7 +89,7 @@ class WordSpaceTokenizer:
 
                 if self.config.feature_flags.enable_ipa_channel:
                     s, e = spans[idx]
-                    token_ipa_ids.append([self._next_ipa_id(unit) for unit in ipa_units[s:e]])
+                    token_ipa_ids.append(ipa_to_ids(ipa_units[s:e]))
                 else:
                     token_ipa_ids.append([])
 
