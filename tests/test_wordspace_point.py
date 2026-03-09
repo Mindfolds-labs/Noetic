@@ -22,6 +22,8 @@ def test_wordspace_point_shape_and_serialization() -> None:
         assoc_vec=(),
         concept_id="concept:greeting",
         confidence=0.93,
+        hyper_vec=(0.1, 0.2, 0.3),
+        phase=0.5,
     )
 
     assert point.shape == (2, 1, 3, 0)
@@ -86,3 +88,18 @@ def test_wordspace_point_optional_monitor_integrity_and_stack() -> None:
 
     assert tuple(text_batch.shape) == (2, 2)
     assert tuple(monitor_batch.shape) == (2, 2)
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
+def test_wordspace_point_accepts_tensor_vectors() -> None:
+    import torch
+
+    point = WordSpacePoint(
+        text_vec=torch.tensor([1.0, 2.0]),
+        ipa_vec=(3,),
+        context_vec=(),
+        assoc_vec=(),
+        monitor_vec=torch.tensor([0.1, 0.2]),
+    )
+    assert point.text_vec == (1.0, 2.0)
+    assert point.monitor_vec == (0.1, 0.2)

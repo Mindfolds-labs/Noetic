@@ -44,6 +44,8 @@ def run() -> None:
     new_norm = h.norm(dim=-1).mean().item()
     old_mem_mb = a.numel() * a.element_size() / (1024 * 1024)
     new_mem_mb = (h.numel() * h.element_size() + b.numel() * b.element_size()) / (1024 * 1024)
+    old_pairwise = torch.matmul(a[:128], a[:128].transpose(0, 1)).mean().item()
+    new_pairwise = torch.matmul(h[:128], h[:128].transpose(0, 1)).mean().item()
 
     print("[WordSpace benchmark]")
     print(f"old_direct4d_runtime_s={old_runtime:.6f}")
@@ -54,6 +56,8 @@ def run() -> None:
     print(f"new_hyper_var_mean={new_var:.6f}")
     print(f"old_memory_mb={old_mem_mb:.4f}")
     print(f"new_memory_mb={new_mem_mb:.4f}")
+    print(f"old_pairwise_similarity_mean={old_pairwise:.6f}")
+    print(f"new_pairwise_similarity_mean={new_pairwise:.6f}")
 
 
 if __name__ == "__main__":

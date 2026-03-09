@@ -17,6 +17,14 @@ def test_config_backward_compatible_target_dim_default_hyper() -> None:
     cfg = WordSpaceConfig(target_dim=4)
     ws = WordSpace(cfg)
     out = ws.project_text(torch.randn(2, cfg.text_input_dim))
+    assert cfg.hyper_dim == 256
+    assert out.shape == (2, 256)
+
+
+def test_config_legacy_none_hyper_maps_to_target_dim() -> None:
+    cfg = WordSpaceConfig(target_dim=4, hyper_dim=None)
+    ws = WordSpace(cfg)
+    out = ws.project_text(torch.randn(2, cfg.text_input_dim))
     assert cfg.hyper_dim == 4
     assert out.shape == (2, 4)
 
@@ -94,3 +102,18 @@ def test_compile_smoke() -> None:
     compiled = torch.compile(ws)
     out = compiled(text=torch.randn(2, 8))
     assert out["text"]["hyper_point"].shape == (2, 16)
+
+
+def test_pairwise_similarity_and_topk() -> None:
+    ws = WordSpace(WordSpaceConfig(text_input_dim=4, hyper_dim=8))
+    query = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    cands = torch.tensor([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.5, 0.5, 0.0, 0.0],
+    ])
+    sims = ws.pairwise_similarity(query, cands, metric="cosine")
+    vals, idx = ws.retrieve_topk(query, cands, k=2, metric="cosine")
+    assert tuple(sims.shape) == (1, 3)
+    assert tuple(vals.shape) == (1, 2)
+    assert idx[0, 0].item() == 0

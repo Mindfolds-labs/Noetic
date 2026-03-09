@@ -4,12 +4,17 @@ from dataclasses import dataclass
 from math import sqrt
 from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
+try:
+    import torch
+except ModuleNotFoundError:  # pragma: no cover
+    torch = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from noetic_pawp.wordspace_tokenizer import WordSpacePayload
 
 
 Vector = tuple[float, ...]
+TensorLike = "torch.Tensor | Sequence[float]"
 Projector = Callable[[Any], Sequence[float]]
 
 
@@ -24,20 +29,28 @@ class WordSpacePoint:
     monitor_vec: Optional[Vector] = None
     integrity_code: Optional[Vector] = None
     metadata: Optional[dict[str, Any]] = None
+    hyper_vec: Optional[Vector] = None
+    phase: Optional[float] = None
+
+    @staticmethod
+    def _coerce_vector(name: str, value: TensorLike | None) -> Optional[Vector]:
+        if value is None:
+            return None
+        if torch is not None and isinstance(value, torch.Tensor):
+            if value.dim() != 1:
+                raise TypeError(f"{name} tensor must be rank-1")
+            return tuple(float(v) for v in value.detach().cpu().tolist())
+        if any(not isinstance(item, (int, float)) for item in value):
+            raise TypeError(f"{name} must contain only numeric values")
+        return tuple(float(item) for item in value)
 
     def __post_init__(self) -> None:
         for name in ("text_vec", "ipa_vec", "context_vec", "assoc_vec"):
-            value = getattr(self, name)
-            if any(not isinstance(item, (int, float)) for item in value):
-                raise TypeError(f"{name} must contain only numeric values")
-            object.__setattr__(self, name, tuple(float(item) for item in value))
-        for name in ("monitor_vec", "integrity_code"):
-            value = getattr(self, name)
-            if value is None:
-                continue
-            if any(not isinstance(item, (int, float)) for item in value):
-                raise TypeError(f"{name} must contain only numeric values")
-            object.__setattr__(self, name, tuple(float(item) for item in value))
+            coerced = self._coerce_vector(name, getattr(self, name))
+            assert coerced is not None
+            object.__setattr__(self, name, coerced)
+        for name in ("monitor_vec", "integrity_code", "hyper_vec"):
+            object.__setattr__(self, name, self._coerce_vector(name, getattr(self, name)))
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
@@ -59,6 +72,8 @@ class WordSpacePoint:
             "monitor_vec": list(self.monitor_vec) if self.monitor_vec is not None else None,
             "integrity_code": list(self.integrity_code) if self.integrity_code is not None else None,
             "metadata": self.metadata,
+            "hyper_vec": list(self.hyper_vec) if self.hyper_vec is not None else None,
+            "phase": self.phase,
         }
 
     @classmethod
@@ -75,13 +90,15 @@ class WordSpacePoint:
                 tuple(data["integrity_code"]) if data.get("integrity_code") is not None else None
             ),
             metadata=data.get("metadata"),
+            hyper_vec=tuple(data["hyper_vec"]) if data.get("hyper_vec") is not None else None,
+            phase=data.get("phase"),
         )
 
     @staticmethod
     def stack_vectors(points: Sequence["WordSpacePoint"], field: str):
         """Stacks a vector field into [batch, dim] tensor for efficient batch ops."""
-        import torch
-
+        if torch is None:
+            raise RuntimeError("PyTorch is required for stack_vectors")
         vectors = [getattr(point, field) for point in points]
         if not vectors:
             return torch.empty(0, 0)
