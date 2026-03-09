@@ -12,6 +12,11 @@ authors = [{name = "Noetic Team"}]
 
 [project.optional-dependencies]
 torch = ["torch>=2.2", "torchvision>=0.17"]
+tensorflow = ["tensorflow>=2.14"]
+onnx = ["onnx>=1.15"]
+observability = ["tensorboard>=2.14"]
+api = ["fastapi>=0.110", "uvicorn>=0.27"]
+tfjs = ["tensorflowjs>=4.17"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
