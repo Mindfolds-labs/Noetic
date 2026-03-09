@@ -22,6 +22,7 @@ class NoeticLeibregConfig:
     image_dim: int = 72
     memory_dim: int = 256
     target_dim: int = 4
+    hyper_dim: int = 256
     wordspace_config: Optional[WordSpaceConfig] = None
     reg_config: Optional[REGCoreConfig] = None
     imagination_config: Optional[ImaginationConfig] = None
@@ -55,6 +56,8 @@ class NoeticLeibregBridge(nn.Module):
                 image_input_dim=self.config.image_dim,
                 memory_input_dim=self.config.memory_dim,
                 target_dim=self.config.target_dim,
+                hyper_dim=self.config.hyper_dim,
+                monitor_dim=self.config.target_dim,
             )
         )
         self.reg = REGCore(self.config.reg_config or REGCoreConfig(dim=self.config.target_dim))
@@ -142,9 +145,13 @@ class NoeticLeibregBridge(nn.Module):
         q_image = self._get_image_embedding(image)
         q_memory = self._get_memory_embedding(memory_keys)
 
-        q_text_4d = self.wordspace.project_text(q_text) if q_text is not None else None
-        q_image_4d = self.wordspace.project_image(q_image) if q_image is not None else None
-        q_memory_4d = self.wordspace.project_memory(q_memory) if q_memory is not None else None
+        q_text_hyper = self.wordspace.project_text(q_text) if q_text is not None else None
+        q_image_hyper = self.wordspace.project_image(q_image) if q_image is not None else None
+        q_memory_hyper = self.wordspace.project_memory(q_memory) if q_memory is not None else None
+
+        q_text_4d = self.wordspace.project_monitor(q_text_hyper) if q_text_hyper is not None else None
+        q_image_4d = self.wordspace.project_monitor(q_image_hyper) if q_image_hyper is not None else None
+        q_memory_4d = self.wordspace.project_monitor(q_memory_hyper) if q_memory_hyper is not None else None
 
         fused = self._fuse(q_text_4d, q_image_4d, q_memory_4d)
         reg_out = self.reg(fused)
@@ -161,7 +168,16 @@ class NoeticLeibregBridge(nn.Module):
         if self.imagination.config.with_confidence:
             result["imagination_confidence"] = imagination_out["confidence"]
         if return_intermediate:
-            result.update({"q_text_raw": q_text, "q_image_raw": q_image, "q_memory_raw": q_memory})
+            result.update(
+                {
+                    "q_text_raw": q_text,
+                    "q_image_raw": q_image,
+                    "q_memory_raw": q_memory,
+                    "q_text_hyper": q_text_hyper,
+                    "q_image_hyper": q_image_hyper,
+                    "q_memory_hyper": q_memory_hyper,
+                }
+            )
         return result
 
     def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
