@@ -1,1 +1,1 @@
-"""Core experimental modules."""
+"""Core modules for memory and cognition utilities."""
