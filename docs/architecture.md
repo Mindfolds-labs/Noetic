@@ -1,59 +1,32 @@
-# Arquitetura PAWP v0.3
+# Arquitetura do Projeto (PAWP v0.4)
 
-## Fluxo textual
+## Camadas
 
-1. Normalização Unicode.
-2. Tokenização WordPiece.
-3. G2P heurístico para IPA.
-4. Alinhamento subword↔IPA.
-5. Geração de `PAWPToken` enriquecido.
+1. **Input adapter**: texto/áudio/OCR para Unicode ou unidades fonéticas.
+2. **Tokenizer layer**: WordPiece base + enriquecimento PAWP.
+3. **Representation layer**: fusão de embeddings (`PAWPFusion`).
+4. **Core model**: encoder PyTorch baseline (`PAWPEncoderModel`).
+5. **Noetic**: etapa futura (fora do escopo atual).
 
-```text
-Unicode -> WordPiece -> G2P(IPA) -> Align -> PAWPToken -> Embeddings -> Noetic/Transformer/GNC
-```
+## Módulos implementados
 
-## Fluxo de áudio (planejado)
+- `config.py`: dataclasses de configuração do tokenizer/modelo.
+- `unicode_rules.py`: normalização e pré-tokenização.
+- `phonetics.py`: G2P heurístico (PT) para IPA units.
+- `roots.py`: heurísticas de raiz/sufixo.
+- `tokenizer.py`: `PAWPTokenizer`, alinhamento subword↔IPA, encode e comparação baseline.
+- `fusion.py`: camada de fusão de embeddings (PyTorch).
+- `model.py`: encoder Transformer pequeno para baseline (PyTorch).
 
-```text
-Áudio -> Encoder acústico -> Unidades fonéticas -> Align com subwords -> PAWPToken -> Modelo
-```
+## Observações
 
-## Formato de token
+- O projeto está preparado para PyTorch, mas mantém import isolado para funcionar sem `torch` no fluxo de tokenização.
+- Scripts de treino (`train_mnist.py`) exigem instalação explícita de `torch`/`torchvision`.
 
-```python
-PAWPToken(
-    wp_piece: str,
-    wp_id: int,
-    ipa_units: list[str],
-    phoneme_spans: list[tuple[int, int]],
-    root_tag: str | None,
-    lang: str | None,
-    cn: list[float] | None,  # placeholder
-)
-```
 
-## Baselines recomendados
+## Experimento de treino real
 
-- Baseline A: WordPiece puro.
-- Baseline B: WordPiece + root_tag.
-- Baseline C: WordPiece + IPA.
-- Baseline D: PAWP completo (IPA + alinhamento + root_tag).
-
-## Limitações atuais
-
-- G2P ainda heurístico (não linguístico completo).
-- Alinhamento proporcional pode falhar em casos irregulares.
-- `cn` ainda é placeholder para fase futura.
-
-## Encoder Unificado PyFolds (v1.0)
-
-Implementação adicionada em `noetic_pawp/pyfolds_encoder.py` com pipeline completo:
-
-1. `RIVEEncoder`: crops concêntricos + features geométricas + solve de Legendre com GCV para gerar `cn ∈ R^72`.
-2. `RadialExtractor`: 8 raios em 4 eixos opostos com saída `x[B,4,2D]`.
-3. `TemporalBuffer`: buffer online com `cn_dot` e `cn_ddot` em custo O(1).
-4. `DendriticFuser`: partição uniforme `18+18+18+18` com replicação de `c0,c1,c2` por dendrito.
-5. `MPJRDLayer`: integração dendrítica, soma somática, spikes, homeostase e campo de surpresa.
-6. `IntentionCtrl`: estados `CURIOSITY/FOCUS/VIGILANCE/CONSOLIDATION` derivados de surpresa agregada.
-7. `GeoTokenizer`: `tau_geo = [cn | cn_dot | cn_ipa] ∈ R^216`.
-8. `UnifiedPyFoldsEncoder`: interface `step(image)` retornando saídas completas (`cn`, `tau_geo`, `state`, `R`, `V`, etc.).
+- Script: `scripts/train_pyfolds_digits.py`
+- Dataset: `sklearn.datasets.load_digits`
+- Compara: PyFolds+head linear vs baseline MLP
+- Saída: `docs/pyfolds_digits_training.md` e `docs/pyfolds_digits_training.json`
