@@ -6,6 +6,8 @@ from .feature_flags import FeatureFlags, add_feature_flag_arguments, feature_fla
 from .tokenizer import PAWPTokenizer, compare_wordpiece_vs_pawp, review_alignment
 from .ipa_encoder import IPA_TOKEN_TO_ID, IPA_UNK_TOKEN, align_text_ipa, ipa_to_ids, text_to_ipa
 from .wordspace_tokenizer import WordSpacePayload, WordSpaceTokenizer
+from .gating import SprintGateStatus, can_enable_multimodal, gate_name_for_sprint
+from .retrieval import RetrievalSample, rank_concepts, retrieval_at_k
 
 __all__ = [
     "ConceptNormalizer",
@@ -27,6 +29,12 @@ __all__ = [
     "text_to_ipa",
     "ipa_to_ids",
     "align_text_ipa",
+    "RetrievalSample",
+    "rank_concepts",
+    "retrieval_at_k",
+    "SprintGateStatus",
+    "can_enable_multimodal",
+    "gate_name_for_sprint",
     "PyFoldsConfig",
     "RIVEEncoder",
     "RadialExtractor",

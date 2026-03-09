@@ -79,3 +79,12 @@ Arquivos:
 - `noetic_pawp/noetic_model.py`
 - `tests/test_noetic_model.py`
 
+
+
+## Avaliação e gates
+
+```bash
+python scripts/eval/benchmark_baseline_vs_new.py
+python scripts/eval/sprint_gates.py --sprint 1 --tokenizer-ok --ipa-ok --concept-ok
+python scripts/eval/benchmark_rive_pge_experimental.py --enable-experimental-rive-pge
+```
