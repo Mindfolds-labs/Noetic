@@ -12,6 +12,8 @@ class FeatureFlags:
     enable_associative_attention: bool = False
     enable_associative_memory: bool = False
     enable_rive_adapter: bool = False
+    enable_multimodal: bool = False
+    enable_experimental_rive_pge: bool = False
 
     def to_dict(self) -> Dict[str, bool]:
         return asdict(self)
@@ -31,6 +33,12 @@ def add_feature_flag_arguments(parser: ArgumentParser) -> None:
         default=FeatureFlags.enable_associative_memory,
     )
     parser.add_argument("--enable-rive-adapter", action="store_true", default=FeatureFlags.enable_rive_adapter)
+    parser.add_argument("--enable-multimodal", action="store_true", default=FeatureFlags.enable_multimodal)
+    parser.add_argument(
+        "--enable-experimental-rive-pge",
+        action="store_true",
+        default=FeatureFlags.enable_experimental_rive_pge,
+    )
 
 
 def feature_flags_from_args(args: Namespace) -> FeatureFlags:
@@ -40,4 +48,6 @@ def feature_flags_from_args(args: Namespace) -> FeatureFlags:
         enable_associative_attention=bool(getattr(args, "enable_associative_attention", False)),
         enable_associative_memory=bool(getattr(args, "enable_associative_memory", False)),
         enable_rive_adapter=bool(getattr(args, "enable_rive_adapter", False)),
+        enable_multimodal=bool(getattr(args, "enable_multimodal", False)),
+        enable_experimental_rive_pge=bool(getattr(args, "enable_experimental_rive_pge", False)),
     )
