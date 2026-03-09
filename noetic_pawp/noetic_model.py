@@ -83,17 +83,30 @@ class NoeticPyFoldsCore(nn.Module):
         self.register_buffer("membrane", torch.zeros(1, self.cfg.hidden_dim))
         self.register_buffer("surprise_trace", torch.zeros(1, self.cfg.hidden_dim))
 
-    def reset_state(self, batch_size: int, device: torch.device) -> None:
-        self.membrane = torch.zeros(batch_size, self.cfg.hidden_dim, device=device)
-        self.surprise_trace = torch.zeros(batch_size, self.cfg.hidden_dim, device=device)
+    def reset_state(self, batch_size: int, device: torch.device, dtype: torch.dtype) -> None:
+        self.membrane = torch.zeros(batch_size, self.cfg.hidden_dim, device=device, dtype=dtype)
+        self.surprise_trace = torch.zeros(batch_size, self.cfg.hidden_dim, device=device, dtype=dtype)
+
+    def _needs_reset(self, batch_size: int, device: torch.device, dtype: torch.dtype) -> bool:
+        """Verifica se o estado interno está incompatível com o lote atual.
+
+        A comparação de `torch.device` é feita por representação textual para evitar
+        falsos negativos quando objetos equivalentes são construídos por caminhos diferentes.
+        """
+
+        return (
+            self.membrane.size(0) != batch_size
+            or str(self.membrane.device) != str(device)
+            or self.membrane.dtype != dtype
+        )
 
     def forward(self, cn: Tensor, *, reset_state: bool = False) -> Dict[str, Tensor]:
         if cn.ndim != 2 or cn.size(-1) != self.cfg.input_dim:
             raise ValueError(f"cn deve ter shape [B, {self.cfg.input_dim}]")
 
         bsz = cn.size(0)
-        if reset_state or self.membrane.size(0) != bsz or self.membrane.device != cn.device:
-            self.reset_state(bsz, cn.device)
+        if reset_state or self._needs_reset(bsz, cn.device, cn.dtype):
+            self.reset_state(bsz, cn.device, cn.dtype)
 
         x = self.in_proj(cn)
         x = self.norm(x)

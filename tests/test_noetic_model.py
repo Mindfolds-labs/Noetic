@@ -37,3 +37,38 @@ def test_noetic_bridge_outputs_prs() -> None:
 
     assert out["prs"].shape == (2, 24)
     assert torch.isfinite(out["prs"]).all()
+
+
+def test_noetic_core_needs_reset_false_when_batch_device_dtype_match() -> None:
+    core = NoeticPyFoldsCore(NoeticPyFoldsConfig(input_dim=72, hidden_dim=16, output_dim=8))
+    cn = torch.randn(3, 72, dtype=torch.float32)
+
+    core(cn, reset_state=True)
+
+    assert core._needs_reset(cn.size(0), cn.device, cn.dtype) is False
+
+
+def test_noetic_core_resets_on_device_change() -> None:
+    core = NoeticPyFoldsCore(NoeticPyFoldsConfig(input_dim=72, hidden_dim=16, output_dim=8))
+    cn = torch.randn(2, 72)
+    core(cn, reset_state=True)
+
+    target_device = torch.device("meta") if str(core.membrane.device) != "meta" else torch.device("cpu")
+
+    assert core._needs_reset(cn.size(0), target_device, cn.dtype) is True
+
+
+def test_noetic_core_resets_on_batch_size_change() -> None:
+    core = NoeticPyFoldsCore(NoeticPyFoldsConfig(input_dim=72, hidden_dim=16, output_dim=8))
+    cn = torch.randn(2, 72)
+    core(cn, reset_state=True)
+
+    assert core._needs_reset(batch_size=4, device=cn.device, dtype=cn.dtype) is True
+
+
+def test_noetic_core_resets_on_dtype_change() -> None:
+    core = NoeticPyFoldsCore(NoeticPyFoldsConfig(input_dim=72, hidden_dim=16, output_dim=8))
+    cn = torch.randn(2, 72, dtype=torch.float32)
+    core(cn, reset_state=True)
+
+    assert core._needs_reset(batch_size=2, device=cn.device, dtype=torch.float16) is True
