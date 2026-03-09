@@ -1,6 +1,7 @@
 """Noetic PAWP prototype package."""
 
 from .config import PAWPConfig, PAWPToken, TokenAnalysis
+from .feature_flags import FeatureFlags, add_feature_flag_arguments, feature_flags_from_args
 from .tokenizer import PAWPTokenizer, compare_wordpiece_vs_pawp, review_alignment
 
 __all__ = [
@@ -10,6 +11,9 @@ __all__ = [
     "PAWPTokenizer",
     "compare_wordpiece_vs_pawp",
     "review_alignment",
+    "feature_flags_from_args",
+    "add_feature_flag_arguments",
+    "FeatureFlags",
     "PyFoldsConfig",
     "RIVEEncoder",
     "RadialExtractor",

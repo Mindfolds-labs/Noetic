@@ -1,6 +1,8 @@
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from .feature_flags import FeatureFlags
+
 
 @dataclass
 class PAWPConfig:
@@ -16,6 +18,7 @@ class PAWPConfig:
     phonetic_weight: float = 0.2
     root_weight: float = 0.15
     max_vocab_size: int = 5000
+    feature_flags: FeatureFlags = field(default_factory=FeatureFlags)
 
 
 @dataclass
