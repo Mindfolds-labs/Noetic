@@ -1,11 +1,15 @@
 """Noetic PAWP prototype package."""
 
+from .concept_normalizer import ConceptNormalizer, resolve_aliases, resolve_concept
 from .config import PAWPConfig, PAWPToken, TokenAnalysis
 from .feature_flags import FeatureFlags, add_feature_flag_arguments, feature_flags_from_args
 from .tokenizer import PAWPTokenizer, compare_wordpiece_vs_pawp, review_alignment
 from .wordspace_tokenizer import WordSpacePayload, WordSpaceTokenizer
 
 __all__ = [
+    "ConceptNormalizer",
+    "resolve_concept",
+    "resolve_aliases",
     "PAWPConfig",
     "PAWPToken",
     "TokenAnalysis",

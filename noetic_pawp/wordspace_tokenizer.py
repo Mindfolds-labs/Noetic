@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
+from .concept_normalizer import ConceptNormalizer
+
 from .align import align_subwords_to_ipa
 from .config import PAWPConfig, PAWPToken
 from .tokenizer import PAWPTokenizer
@@ -15,16 +17,22 @@ class WordSpacePayload:
     token_text: List[str]
     token_offsets: List[Tuple[int, int]]
     token_ipa_ids: List[List[int]]
-    concept_ids: Optional[List[int]] = None
+    concept_ids: Optional[List[Optional[str]]] = None
 
 
 class WordSpaceTokenizer:
     """WordSpace wrapper that reuses the baseline PAWPTokenizer internals."""
 
-    def __init__(self, tokenizer: Optional[PAWPTokenizer] = None, config: Optional[PAWPConfig] = None) -> None:
+    def __init__(
+        self,
+        tokenizer: Optional[PAWPTokenizer] = None,
+        config: Optional[PAWPConfig] = None,
+        concept_normalizer: Optional[ConceptNormalizer] = None,
+    ) -> None:
         self.tokenizer = tokenizer or PAWPTokenizer(config=config)
         self.config = self.tokenizer.config
         self._ipa_vocab: Dict[str, int] = {"<pad>": 0, "<unk>": 1}
+        self.concept_normalizer = concept_normalizer or ConceptNormalizer()
 
     def _next_ipa_id(self, ipa_unit: str) -> int:
         if ipa_unit not in self._ipa_vocab:
@@ -71,7 +79,7 @@ class WordSpaceTokenizer:
         token_text: List[str] = []
         token_offsets: List[Tuple[int, int]] = []
         token_ipa_ids: List[List[int]] = []
-        concept_ids: Optional[List[int]] = [] if self.config.feature_flags.enable_associative_memory else None
+        concept_ids: Optional[List[Optional[str]]] = [] if self.config.feature_flags.enable_associative_memory else None
 
         for analysis, (_, start, end) in zip(analyses, words):
             ipa_units = list(analysis.ipa)
@@ -90,8 +98,7 @@ class WordSpaceTokenizer:
                     token_ipa_ids.append([])
 
                 if concept_ids is not None:
-                    root = analysis.root_segments[0] if analysis.root_segments else ""
-                    concept_ids.append(abs(hash((root, piece))) % 10_000)
+                    concept_ids.append(self.concept_normalizer.resolve_concept(token_text=piece, language=language))
 
         return WordSpacePayload(
             token_ids=token_ids,
