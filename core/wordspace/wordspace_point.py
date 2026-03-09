@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from math import sqrt
+from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from noetic_pawp.wordspace_tokenizer import WordSpacePayload
+
+
+Vector = tuple[float, ...]
+Projector = Callable[[Any], Sequence[float]]
+
+
+@dataclass(frozen=True)
+class WordSpacePoint:
+    text_vec: Vector
+    ipa_vec: Vector
+    context_vec: Vector
+    assoc_vec: Vector
+    concept_id: Optional[str] = None
+    confidence: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        for name in ("text_vec", "ipa_vec", "context_vec", "assoc_vec"):
+            value = getattr(self, name)
+            if any(not isinstance(item, (int, float)) for item in value):
+                raise TypeError(f"{name} must contain only numeric values")
+            object.__setattr__(self, name, tuple(float(item) for item in value))
+
+    @property
+    def shape(self) -> tuple[int, int, int, int]:
+        return (
+            len(self.text_vec),
+            len(self.ipa_vec),
+            len(self.context_vec),
+            len(self.assoc_vec),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "text_vec": list(self.text_vec),
+            "ipa_vec": list(self.ipa_vec),
+            "context_vec": list(self.context_vec),
+            "assoc_vec": list(self.assoc_vec),
+            "concept_id": self.concept_id,
+            "confidence": self.confidence,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "WordSpacePoint":
+        return cls(
+            text_vec=tuple(data.get("text_vec", [])),
+            ipa_vec=tuple(data.get("ipa_vec", [])),
+            context_vec=tuple(data.get("context_vec", [])),
+            assoc_vec=tuple(data.get("assoc_vec", [])),
+            concept_id=data.get("concept_id"),
+            confidence=data.get("confidence"),
+        )
+
+
+class QuaternionWordSpace:
+    """Small quaternion helper for modality fusion math."""
+
+    @staticmethod
+    def multiply(q1: Sequence[float], q2: Sequence[float]) -> tuple[float, float, float, float]:
+        a1, b1, c1, d1 = q1
+        a2, b2, c2, d2 = q2
+        return (
+            a1 * a2 - b1 * b2 - c1 * c2 - d1 * d2,
+            a1 * b2 + b1 * a2 + c1 * d2 - d1 * c2,
+            a1 * c2 - b1 * d2 + c1 * a2 + d1 * b2,
+            a1 * d2 + b1 * c2 - c1 * b2 + d1 * a2,
+        )
+
+    @staticmethod
+    def conjugate(q: Sequence[float]) -> tuple[float, float, float, float]:
+        a, b, c, d = q
+        return (a, -b, -c, -d)
+
+    @staticmethod
+    def normalize(q: Sequence[float]) -> tuple[float, float, float, float]:
+        norm = sqrt(sum(v * v for v in q))
+        if norm == 0:
+            return (1.0, 0.0, 0.0, 0.0)
+        return tuple(float(v / norm) for v in q)  # type: ignore[return-value]
+
+    @classmethod
+    def rotate_vector(cls, vector: Sequence[float], rotor: Sequence[float]) -> tuple[float, float, float]:
+        vx, vy, vz = vector
+        rot = cls.normalize(rotor)
+        vec_q = (0.0, vx, vy, vz)
+        out = cls.multiply(cls.multiply(rot, vec_q), cls.conjugate(rot))
+        return (out[1], out[2], out[3])
+
+
+def _default_text_projector(token_id: int) -> Vector:
+    return (float(token_id),)
+
+
+def _default_ipa_projector(ipa_ids: Sequence[int]) -> Vector:
+    return tuple(float(v) for v in ipa_ids)
+
+
+def wordspace_points_from_payload(
+    payload: "WordSpacePayload",
+    text_projector: Optional[Projector] = None,
+    ipa_projector: Optional[Projector] = None,
+    context_projector: Optional[Projector] = None,
+    assoc_projector: Optional[Projector] = None,
+    default_confidence: Optional[float] = 1.0,
+) -> list[WordSpacePoint]:
+    text_projector = text_projector or _default_text_projector
+    ipa_projector = ipa_projector or _default_ipa_projector
+    context_projector = context_projector or (lambda _: ())
+    assoc_projector = assoc_projector or (lambda _: ())
+
+    points: list[WordSpacePoint] = []
+    for idx, token_id in enumerate(payload.token_ids):
+        concept_id = payload.concept_ids[idx] if payload.concept_ids is not None else None
+        points.append(
+            WordSpacePoint(
+                text_vec=tuple(float(v) for v in text_projector(token_id)),
+                ipa_vec=tuple(float(v) for v in ipa_projector(payload.token_ipa_ids[idx])),
+                context_vec=tuple(float(v) for v in context_projector(payload.token_text[idx])),
+                assoc_vec=tuple(float(v) for v in assoc_projector(concept_id)),
+                concept_id=concept_id,
+                confidence=default_confidence,
+            )
+        )
+    return points
+
+
+def payload_from_wordspace_points(
+    points: Sequence[WordSpacePoint],
+    token_text: Optional[Sequence[str]] = None,
+    token_offsets: Optional[Sequence[tuple[int, int]]] = None,
+):
+    from noetic_pawp.wordspace_tokenizer import WordSpacePayload
+
+    text = list(token_text) if token_text is not None else ["" for _ in points]
+    offsets = list(token_offsets) if token_offsets is not None else [(0, 0) for _ in points]
+    token_ids = [int(round(point.text_vec[0])) if point.text_vec else 0 for point in points]
+    token_ipa_ids = [[int(round(v)) for v in point.ipa_vec] for point in points]
+    concept_ids = [point.concept_id for point in points]
+
+    return WordSpacePayload(
+        token_ids=token_ids,
+        token_text=text,
+        token_offsets=offsets,
+        token_ipa_ids=token_ipa_ids,
+        concept_ids=concept_ids,
+    )
