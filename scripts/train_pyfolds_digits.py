@@ -4,20 +4,34 @@ from _bootstrap import ensure_src_on_path
 
 ensure_src_on_path()
 
+import argparse
 import contextlib
 import io
 import json
 from pathlib import Path
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from sklearn.datasets import load_digits
-from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader, TensorDataset
 
-from pyfolds.core import MPJRDConfig
-from pyfolds.network import NetworkBuilder
+def _import_or_raise() -> tuple:
+    """Importa dependências pesadas com mensagem explícita de ambiente.
+
+    Mantém o script importável mesmo sem torch/pyfolds/sklearn e falha apenas no runtime.
+    """
+
+    try:
+        import torch
+        import torch.nn as nn
+        import torch.nn.functional as F
+        from sklearn.datasets import load_digits
+        from sklearn.model_selection import train_test_split
+        from torch.utils.data import DataLoader, TensorDataset
+        from pyfolds.core import MPJRDConfig
+        from pyfolds.network import NetworkBuilder
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(
+            "Dependências ausentes. Instale: torch torchvision scikit-learn pyfolds"
+        ) from exc
+
+    return torch, nn, F, load_digits, train_test_split, DataLoader, TensorDataset, MPJRDConfig, NetworkBuilder
 
 
 def _silent_forward(net, x, reward: float, mode: str = "online"):
@@ -25,16 +39,23 @@ def _silent_forward(net, x, reward: float, mode: str = "online"):
         return net(x, reward=reward, mode=mode)["output"].float()
 
 
-def _prepare_pyfolds_input(images: torch.Tensor) -> torch.Tensor:
+def _prepare_pyfolds_input(images, F):
+    # Mapeia imagem 8x8 para 28x28 e reestrutura em 49 patches 4x4.
+    # Isso preserva localidade espacial para a camada de entrada do PyFolds.
     x = F.interpolate(images.unsqueeze(1), size=(28, 28), mode="bilinear", align_corners=False)
     x = x.clamp(0.0, 1.0)
     return x.view(x.size(0), 49, 4, 4)
 
 
-def build_digits_dataloaders(batch_size: int = 64):
+def build_digits_dataloaders(load_digits, train_test_split, DataLoader, TensorDataset, batch_size: int = 64):
     digits = load_digits()
-    x = torch.tensor(digits.images, dtype=torch.float32) / 16.0
-    y = torch.tensor(digits.target, dtype=torch.long)
+    x = digits.images
+    y = digits.target
+
+    import torch
+
+    x = torch.tensor(x, dtype=torch.float32) / 16.0
+    y = torch.tensor(y, dtype=torch.long)
 
     x_train, x_test, y_train, y_test = train_test_split(
         x, y, test_size=0.2, random_state=42, stratify=y
@@ -50,7 +71,7 @@ def build_digits_dataloaders(batch_size: int = 64):
     )
 
 
-def build_pyfolds_network() -> torch.nn.Module:
+def build_pyfolds_network(MPJRDConfig, NetworkBuilder):
     cfg = MPJRDConfig(
         n_dendrites=4,
         n_synapses_per_dendrite=4,
@@ -64,15 +85,17 @@ def build_pyfolds_network() -> torch.nn.Module:
     return builder.build()
 
 
-def evaluate_pyfolds(net, head, loader, device):
+def evaluate_pyfolds(net, head, loader, device, F):
     head.eval()
     total = 0
     correct = 0
+    import torch
+
     with torch.no_grad():
         for x, y in loader:
             x = x.to(device)
             y = y.to(device)
-            inp = _prepare_pyfolds_input(x)
+            inp = _prepare_pyfolds_input(x, F)
             feats = _silent_forward(net, inp, reward=0.0, mode="online")
             logits = head(feats)
             pred = logits.argmax(dim=1)
@@ -81,8 +104,10 @@ def evaluate_pyfolds(net, head, loader, device):
     return correct / max(1, total)
 
 
-def train_pyfolds_head(train_loader, test_loader, device, epochs: int = 10):
-    net = build_pyfolds_network().to(device)
+def train_pyfolds_head(train_loader, test_loader, device, nn, F, MPJRDConfig, NetworkBuilder, epochs: int = 20):
+    import torch
+
+    net = build_pyfolds_network(MPJRDConfig, NetworkBuilder).to(device)
     head = nn.Sequential(nn.Linear(10, 32), nn.ReLU(), nn.Linear(32, 10)).to(device)
     opt = torch.optim.Adam(head.parameters(), lr=1e-3)
     loss_fn = nn.CrossEntropyLoss()
@@ -97,7 +122,7 @@ def train_pyfolds_head(train_loader, test_loader, device, epochs: int = 10):
         for x, y in train_loader:
             x = x.to(device)
             y = y.to(device)
-            inp = _prepare_pyfolds_input(x)
+            inp = _prepare_pyfolds_input(x, F)
 
             feats = _silent_forward(net, inp, reward=0.0, mode="online")
             logits = head(feats)
@@ -109,6 +134,7 @@ def train_pyfolds_head(train_loader, test_loader, device, epochs: int = 10):
 
             pred = logits.argmax(dim=1)
             batch_acc = (pred == y).float().mean().item()
+            # Reward bipolar em [-1,1], alinhado com precisão instantânea.
             reward = (2.0 * batch_acc) - 1.0
             _silent_forward(net, inp, reward=reward, mode="online")
 
@@ -120,7 +146,7 @@ def train_pyfolds_head(train_loader, test_loader, device, epochs: int = 10):
             "epoch": epoch,
             "train_loss": round(running_loss / max(1, total), 4),
             "train_acc": round(correct / max(1, total), 4),
-            "test_acc": round(evaluate_pyfolds(net, head, test_loader, device), 4),
+            "test_acc": round(evaluate_pyfolds(net, head, test_loader, device, F), 4),
         }
         history.append(row)
         print({"pyfolds": row})
@@ -131,6 +157,8 @@ def evaluate_baseline(model, loader, device):
     model.eval()
     total = 0
     correct = 0
+    import torch
+
     with torch.no_grad():
         for x, y in loader:
             x = x.to(device)
@@ -142,7 +170,9 @@ def evaluate_baseline(model, loader, device):
     return correct / max(1, total)
 
 
-def train_baseline(train_loader, test_loader, device, epochs: int = 10):
+def train_baseline(train_loader, test_loader, device, nn, epochs: int = 20):
+    import torch
+
     model = nn.Sequential(
         nn.Linear(64, 128),
         nn.ReLU(),
@@ -182,22 +212,48 @@ def train_baseline(train_loader, test_loader, device, epochs: int = 10):
 
 
 def main() -> None:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_loader, test_loader, n_train, n_test = build_digits_dataloaders(batch_size=64)
+    parser = argparse.ArgumentParser(description="Treino PyFolds no dataset Digits.")
+    parser.add_argument("--epochs", type=int, default=20, help="Número de épocas (mínimo recomendado: 20).")
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--out-prefix", type=str, default="pyfolds_digits_training")
+    args = parser.parse_args()
 
-    pyfolds_history = train_pyfolds_head(train_loader, test_loader, device, epochs=10)
-    baseline_history = train_baseline(train_loader, test_loader, device, epochs=10)
+    if args.epochs < 1:
+        raise ValueError("--epochs deve ser >= 1")
+
+    (
+        torch,
+        nn,
+        F,
+        load_digits,
+        train_test_split,
+        DataLoader,
+        TensorDataset,
+        MPJRDConfig,
+        NetworkBuilder,
+    ) = _import_or_raise()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_loader, test_loader, n_train, n_test = build_digits_dataloaders(
+        load_digits, train_test_split, DataLoader, TensorDataset, batch_size=args.batch_size
+    )
+
+    pyfolds_history = train_pyfolds_head(
+        train_loader, test_loader, device, nn, F, MPJRDConfig, NetworkBuilder, epochs=args.epochs
+    )
+    baseline_history = train_baseline(train_loader, test_loader, device, nn, epochs=args.epochs)
 
     out_dir = Path("docs")
     out_dir.mkdir(exist_ok=True)
-    json_path = out_dir / "pyfolds_digits_training.json"
-    md_path = out_dir / "pyfolds_digits_training.md"
+    json_path = out_dir / f"{args.out_prefix}.json"
+    md_path = out_dir / f"{args.out_prefix}.md"
 
     payload = {
         "dataset": "sklearn_digits",
         "train_size": n_train,
         "test_size": n_test,
         "device": str(device),
+        "epochs": args.epochs,
         "pyfolds": pyfolds_history,
         "baseline": baseline_history,
     }
@@ -207,7 +263,7 @@ def main() -> None:
         "# Resultado de treinamento real (PyFolds + Digits)",
         "",
         f"- Dataset: sklearn digits (real), train={n_train}, test={n_test}",
-        "- Épocas: 10",
+        f"- Épocas: {args.epochs}",
         f"- Device: {device}",
         "",
         "## PyFolds + Head linear",
@@ -233,8 +289,8 @@ def main() -> None:
         f"PyFolds teste final: **{pyfolds_history[-1]['test_acc']:.4f}**",
         f"Baseline teste final: **{baseline_history[-1]['test_acc']:.4f}**",
         "",
-        "Conclusão inicial: baseline MLP ainda supera bastante esta configuração de PyFolds;"
-        " a integração precisa de tuning (input encoding, reward schedule e parâmetros MPJRD).",
+        "Conclusão inicial: baseline MLP ainda pode superar esta configuração de PyFolds;"
+        " recomenda-se tuning de input encoding, reward schedule e hiperparâmetros MPJRD.",
     ]
     md_path.write_text("\n".join(lines))
     print({"json": str(json_path), "markdown": str(md_path)})
