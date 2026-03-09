@@ -14,7 +14,7 @@ class WordSpaceConfig:
     image_input_dim: int = 72
     memory_input_dim: int = 256
     target_dim: int = 4
-    hyper_dim: int | None = None
+    hyper_dim: int | None = 256
     monitor_dim: int = 4
     use_monitor_projection: bool = True
     similarity_metric: Literal["cosine", "euclidean"] = "cosine"
@@ -27,8 +27,16 @@ class WordSpaceConfig:
     enable_telemetry: bool = False
 
     def __post_init__(self) -> None:
+        if self.text_input_dim <= 0 or self.image_input_dim <= 0 or self.memory_input_dim <= 0:
+            raise ValueError("input dims must be > 0")
+        if self.target_dim <= 0:
+            raise ValueError("target_dim must be > 0")
         if self.hyper_dim is None:
+            # Legacy behavior: callers that explicitly pass hyper_dim=None keep the old
+            # target_dim-sized projection path.
             object.__setattr__(self, "hyper_dim", self.target_dim)
+        if int(self.hyper_dim) <= 0:
+            raise ValueError("hyper_dim must be > 0")
         if self.monitor_dim <= 0:
             raise ValueError("monitor_dim must be > 0")
         if self.integrity_dim <= 0:
@@ -60,6 +68,10 @@ class WordSpace(nn.Module):
             else None
         )
         self._init_weights()
+
+    @property
+    def hyper_dim(self) -> int:
+        return int(self.config.hyper_dim or self.config.target_dim)
 
     def _init_weights(self) -> None:
         for module in self.modules():
@@ -135,6 +147,39 @@ class WordSpace(nn.Module):
     def monitor_similarity(self, left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
         return self.similarity(left, right, metric=self.config.similarity_metric)
 
+    def pairwise_similarity(
+        self,
+        query: torch.Tensor,
+        candidates: torch.Tensor,
+        metric: str | None = None,
+    ) -> torch.Tensor:
+        """Returns [batch_query, batch_candidates] similarity scores."""
+        metric_name = metric or self.config.similarity_metric
+        q = self._normalize_shape(query)
+        c = self._normalize_shape(candidates)
+        if metric_name == "cosine":
+            qn = F.normalize(q, p=2, dim=-1)
+            cn = F.normalize(c, p=2, dim=-1)
+            return qn @ cn.transpose(0, 1)
+        if metric_name == "euclidean":
+            return -torch.cdist(q, c, p=2)
+        raise ValueError(f"Unsupported metric: {metric_name}")
+
+    def retrieve_topk(
+        self,
+        query: torch.Tensor,
+        candidates: torch.Tensor,
+        k: int = 5,
+        metric: str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Top-k retrieval over candidate vectors; complexity O(Bq * Bc * D)."""
+        if k <= 0:
+            raise ValueError("k must be > 0")
+        sims = self.pairwise_similarity(query, candidates, metric=metric)
+        top_k = min(k, sims.shape[-1])
+        values, indices = torch.topk(sims, k=top_k, dim=-1)
+        return values, indices
+
 
     def _emit_telemetry(
         self,
@@ -153,8 +198,10 @@ class WordSpace(nn.Module):
         monitor_norms: list[torch.Tensor] = []
         projector_vars: list[torch.Tensor] = []
         integrity_means: list[torch.Tensor] = []
+        hyper_points: list[torch.Tensor] = []
         for payload in outputs.values():
             hyper = payload["hyper_point"]
+            hyper_points.append(hyper)
             hyper_norms.append(hyper.norm(dim=-1))
             projector_vars.append(hyper.var(dim=-1))
             monitor = payload.get("monitor_point")
@@ -174,6 +221,11 @@ class WordSpace(nn.Module):
             metrics["projector_output_variance"] = float(torch.cat(projector_vars).mean().item())
         if integrity_means:
             metrics["integrity_code_mean"] = float(torch.cat(integrity_means).mean().item())
+        if len(hyper_points) >= 2:
+            sims: list[torch.Tensor] = []
+            for idx in range(len(hyper_points) - 1):
+                sims.append(self.similarity(hyper_points[idx], hyper_points[idx + 1]))
+            metrics["similarity_mean"] = float(torch.cat(sims).mean().item())
 
         telemetry.log_step(step, **metrics)
 
