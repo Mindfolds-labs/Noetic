@@ -1,9 +1,16 @@
+import importlib.util
+
+import pytest
+
 from core.wordspace.wordspace_point import (
     WordSpacePoint,
     payload_from_wordspace_points,
     wordspace_points_from_payload,
 )
 from noetic_pawp.feature_flags import FeatureFlags
+
+HAS_TORCH = importlib.util.find_spec("torch") is not None
+
 from noetic_pawp.wordspace_tokenizer import WordSpacePayload, WordSpaceTokenizer
 
 
@@ -65,3 +72,17 @@ def test_wordspace_from_enriched_tokenizer_output() -> None:
     assert all(len(point.text_vec) == 1 for point in points)
     expected_concepts = payload.concept_ids or [None] * len(payload.token_ids)
     assert [point.concept_id for point in points] == expected_concepts
+
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
+def test_wordspace_point_optional_monitor_integrity_and_stack() -> None:
+    points = [
+        WordSpacePoint(text_vec=(1, 2), ipa_vec=(3,), context_vec=(), assoc_vec=(), monitor_vec=(0.1, 0.2), integrity_code=(0.9,)),
+        WordSpacePoint(text_vec=(4, 5), ipa_vec=(6,), context_vec=(), assoc_vec=(), monitor_vec=(0.3, 0.4), integrity_code=(0.8,)),
+    ]
+    text_batch = WordSpacePoint.stack_vectors(points, "text_vec")
+    monitor_batch = WordSpacePoint.stack_vectors(points, "monitor_vec")
+
+    assert tuple(text_batch.shape) == (2, 2)
+    assert tuple(monitor_batch.shape) == (2, 2)
