@@ -54,3 +54,20 @@ def test_wordspace_payload_contract() -> None:
     assert payload.token_ipa_ids
     assert payload.concept_ids is None
     assert len(payload.token_ids) == len(payload.token_text) == len(payload.token_offsets) == len(payload.token_ipa_ids)
+
+
+def test_wordspace_ipa_ids_are_deterministic_across_instances() -> None:
+    base_a = _baseline_tokenizer()
+    base_a.config.feature_flags = FeatureFlags(enable_wordspace=True, enable_ipa_channel=True)
+    base_b = _baseline_tokenizer()
+    base_b.config.feature_flags = FeatureFlags(enable_wordspace=True, enable_ipa_channel=True)
+
+    ws_a = WordSpaceTokenizer(tokenizer=base_a)
+    ws_b = WordSpaceTokenizer(tokenizer=base_b)
+
+    payload_a = ws_a.encode("karaokê linguística", language="pt")
+    payload_b = ws_b.encode("karaokê linguística", language="pt")
+
+    assert isinstance(payload_a, WordSpacePayload)
+    assert isinstance(payload_b, WordSpacePayload)
+    assert payload_a.token_ipa_ids == payload_b.token_ipa_ids
