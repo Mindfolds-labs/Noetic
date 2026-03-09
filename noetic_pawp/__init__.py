@@ -46,3 +46,26 @@ else:
         "NoeticPyFoldsCore",
         "NoeticMMRNBridge",
     ]
+
+try:
+    from .mmrn_prototype import MMRNPrototype, ProjectiveOCR, ProjectiveOCRConfig, ProjectiveOCRLoss
+except ImportError:
+    pass
+else:
+    __all__ += [
+        "ProjectiveOCRConfig",
+        "ProjectiveOCR",
+        "ProjectiveOCRLoss",
+        "MMRNPrototype",
+    ]
+
+try:
+    from .rive_mpjrd import RIVEDepthLoss, RIVEDepthLossConfig, RIVEDepthNet
+except ImportError:
+    pass
+else:
+    __all__ += [
+        "RIVEDepthNet",
+        "RIVEDepthLossConfig",
+        "RIVEDepthLoss",
+    ]
