@@ -66,3 +66,16 @@ Após rodar `python scripts/train_pyfolds_digits.py`, os resultados ficam em:
 
 - `docs/pyfolds_digits_training.md`
 - `docs/pyfolds_digits_training.json`
+
+
+## Núcleo Noético (PyFolds)
+
+Foi adicionado um núcleo noético com estado recorrente para integração com `cn` (72D):
+
+- `NoeticPyFoldsCore`: dinâmica de membrana + spikes com surrogate gradient + traço de surpresa.
+- `NoeticMMRNBridge`: projeta saída noética para um espaço latente tipo PRS.
+
+Arquivos:
+- `noetic_pawp/noetic_model.py`
+- `tests/test_noetic_model.py`
+

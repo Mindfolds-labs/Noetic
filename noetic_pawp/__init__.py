@@ -36,3 +36,13 @@ from .pyfolds_encoder import (
     TemporalBuffer,
     UnifiedPyFoldsEncoder,
 )
+try:
+    from .noetic_model import NoeticMMRNBridge, NoeticPyFoldsConfig, NoeticPyFoldsCore
+except ImportError:  # optional torch dependency
+    pass
+else:
+    __all__ += [
+        "NoeticPyFoldsConfig",
+        "NoeticPyFoldsCore",
+        "NoeticMMRNBridge",
+    ]
