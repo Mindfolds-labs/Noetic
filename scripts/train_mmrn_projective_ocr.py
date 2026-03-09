@@ -8,6 +8,8 @@ import argparse
 import json
 from pathlib import Path
 
+from noetic_pawp.feature_flags import add_feature_flag_arguments, feature_flags_from_args
+
 import torch
 import torch.nn.functional as F
 from sklearn.datasets import load_digits
@@ -75,11 +77,13 @@ def evaluate(model: MMRNPrototype, loader: DataLoader, criterion: ProjectiveOCRL
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Treino real MMRN + Projective OCR em sklearn digits")
+    add_feature_flag_arguments(parser)
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--out-prefix", type=str, default="mmrn_projective_ocr_training")
     args = parser.parse_args()
+    feature_flags = feature_flags_from_args(args)
 
     digits = load_digits()
     x = torch.tensor(digits.images, dtype=torch.float32).unsqueeze(1) / 16.0
@@ -111,11 +115,11 @@ def main() -> None:
         val_loss, val_acc = evaluate(model, test_loader, criterion, device)
         row = {"epoch": epoch, "val_loss": round(val_loss, 4), "val_acc": round(val_acc, 4)}
         history.append(row)
-        print(row)
+        print({**row, "feature_flags": feature_flags.to_dict()})
 
     out_dir = Path("docs")
     out_dir.mkdir(exist_ok=True)
-    (out_dir / f"{args.out_prefix}.json").write_text(json.dumps({"epochs": args.epochs, "history": history}, indent=2))
+    (out_dir / f"{args.out_prefix}.json").write_text(json.dumps({"epochs": args.epochs, "feature_flags": feature_flags.to_dict(), "history": history}, indent=2))
 
 
 if __name__ == "__main__":

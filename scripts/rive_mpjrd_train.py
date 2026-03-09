@@ -8,6 +8,8 @@ import argparse
 import json
 from pathlib import Path
 
+from noetic_pawp.feature_flags import add_feature_flag_arguments, feature_flags_from_args
+
 import torch
 import torch.nn.functional as F
 from sklearn.datasets import load_digits
@@ -45,11 +47,13 @@ def evaluate(model, loader, criterion, device):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="RIVE+MPJRD training (demo with dense pseudo-depth)")
+    add_feature_flag_arguments(ap)
     ap.add_argument("--epochs", type=int, default=5)
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--out-prefix", type=str, default="rive_mpjrd_digits")
     args = ap.parse_args()
+    feature_flags = feature_flags_from_args(args)
 
     d = load_digits()
     x = torch.tensor(d.images, dtype=torch.float32).unsqueeze(1) / 16.0
@@ -80,11 +84,11 @@ def main() -> None:
         val_loss, val_metrics = evaluate(model, te, criterion, device)
         row = {"epoch": epoch, "val_loss": round(val_loss, 4), **{k: round(v, 4) for k, v in val_metrics.items()}}
         history.append(row)
-        print(row)
+        print({**row, "feature_flags": feature_flags.to_dict()})
 
     out = Path("docs")
     out.mkdir(exist_ok=True)
-    (out / f"{args.out_prefix}.json").write_text(json.dumps({"history": history}, indent=2))
+    (out / f"{args.out_prefix}.json").write_text(json.dumps({"feature_flags": feature_flags.to_dict(), "history": history}, indent=2))
 
 
 if __name__ == "__main__":

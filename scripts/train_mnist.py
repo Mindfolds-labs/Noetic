@@ -1,3 +1,11 @@
+from _bootstrap import ensure_src_on_path
+
+ensure_src_on_path()
+
+import argparse
+
+from noetic_pawp.feature_flags import add_feature_flag_arguments, feature_flags_from_args
+
 try:
     import torch
     from torch import nn
@@ -36,13 +44,18 @@ def build_dataset():
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Treino CNN baseline para MNIST.")
+    add_feature_flag_arguments(parser)
+    args = parser.parse_args()
+    feature_flags = feature_flags_from_args(args)
+
     ds, source = build_dataset()
     dl = DataLoader(ds, batch_size=64, shuffle=True)
     model = SmallCNN(out_dim=10)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.CrossEntropyLoss()
 
-    print({"dataset": source, "size": len(ds)})
+    print({"dataset": source, "size": len(ds), "feature_flags": feature_flags.to_dict()})
     model.train()
     for step, (x, y) in enumerate(dl):
         logits = model(x)

@@ -10,6 +10,8 @@ import io
 import json
 from pathlib import Path
 
+from noetic_pawp.feature_flags import add_feature_flag_arguments, feature_flags_from_args
+
 
 def _import_or_raise() -> tuple:
     """Importa dependências pesadas com mensagem explícita de ambiente.
@@ -213,10 +215,12 @@ def train_baseline(train_loader, test_loader, device, nn, epochs: int = 20):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Treino PyFolds no dataset Digits.")
+    add_feature_flag_arguments(parser)
     parser.add_argument("--epochs", type=int, default=20, help="Número de épocas (mínimo recomendado: 20).")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--out-prefix", type=str, default="pyfolds_digits_training")
     args = parser.parse_args()
+    feature_flags = feature_flags_from_args(args)
 
     if args.epochs < 1:
         raise ValueError("--epochs deve ser >= 1")
@@ -254,6 +258,7 @@ def main() -> None:
         "test_size": n_test,
         "device": str(device),
         "epochs": args.epochs,
+        "feature_flags": feature_flags.to_dict(),
         "pyfolds": pyfolds_history,
         "baseline": baseline_history,
     }
