@@ -4,6 +4,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from core.memory.associative_memory import AssociativeMemory
 from noetic_pawp.mmrn_prototype import MMRNPrototype, ProjectiveOCRConfig, ProjectiveOCRLoss
 
 
@@ -56,3 +57,20 @@ def test_projective_ocr_loss_validates_semantic_shapes() -> None:
     }
     with pytest.raises(ValueError, match="attributes"):
         criterion(out, y, target_contour, semantic_targets=bad_semantic_targets)
+
+
+def test_mmrn_accepts_associative_memory_bias() -> None:
+    model = MMRNPrototype(ProjectiveOCRConfig(image_size=16, num_classes=10))
+    memory = AssociativeMemory("data/concepts")
+    x = torch.rand(2, 1, 16, 16)
+    ipa = torch.randint(0, 8, (2, 3))
+
+    out = model(
+        x,
+        ipa,
+        concept_ids=["concept.greeting.hello", "concept.food.coffee"],
+        associative_memory=memory,
+    )
+
+    assert out["prs"].shape == (2, 128)
+    assert torch.isfinite(out["prs"]).all()

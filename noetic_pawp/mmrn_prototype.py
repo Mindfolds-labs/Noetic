@@ -8,7 +8,7 @@ Imagem -> retificação projetiva (aprox. afim) -> contorno -> Bézier -> embedd
 """
 
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional, Sequence
 
 import torch
 from torch import Tensor, nn
@@ -178,6 +178,7 @@ class GeoLinguisticEncoder(nn.Module):
 class NoeticFusionEngine(nn.Module):
     def __init__(self, geom_dim: int = 64, lang_dim: int = 64, prs_dim: int = 128) -> None:
         super().__init__()
+        self.attention_gate = nn.Linear(geom_dim + lang_dim, 2)
         self.fuse = nn.Sequential(
             nn.Linear(geom_dim + lang_dim, prs_dim),
             nn.GELU(),
@@ -185,8 +186,27 @@ class NoeticFusionEngine(nn.Module):
             nn.Linear(prs_dim, prs_dim),
         )
 
-    def forward(self, geom: Tensor, lang: Tensor) -> Tensor:
-        return self.fuse(torch.cat([geom, lang], dim=-1))
+    def forward(self, geom: Tensor, lang: Tensor, assoc_bias: Optional[Tensor] = None) -> Tensor:
+        logits = self.attention_gate(torch.cat([geom, lang], dim=-1))
+        if assoc_bias is not None:
+            bias = assoc_bias.view(-1).to(device=logits.device, dtype=logits.dtype)
+            logits[:, 1] = logits[:, 1] + bias
+        weights = torch.softmax(logits, dim=-1)
+        gated = torch.cat([geom * weights[:, 0:1], lang * weights[:, 1:2]], dim=-1)
+        return self.fuse(gated)
+
+
+def _association_bias_from_memory(associative_memory: object, concept_ids: Sequence[Optional[str]], *, top_k: int = 5) -> Optional[Tensor]:
+    if not concept_ids:
+        return None
+    values = []
+    for cid in concept_ids:
+        if cid is None:
+            values.append(0.0)
+            continue
+        associations = associative_memory.retrieve_associations(cid, top_k=top_k)
+        values.append(min(float(len(associations)) / max(float(top_k), 1.0), 1.0))
+    return torch.tensor(values, dtype=torch.float32)
 
 
 class PRSDecoder(nn.Module):
@@ -244,10 +264,22 @@ class MMRNPrototype(nn.Module):
             num_contexts=cfg.num_contexts,
         )
 
-    def forward(self, image: Tensor, ipa_tokens: Tensor) -> Dict[str, Tensor]:
+    def forward(
+        self,
+        image: Tensor,
+        ipa_tokens: Tensor,
+        *,
+        concept_ids: Optional[Sequence[Optional[str]]] = None,
+        associative_memory: Optional[object] = None,
+    ) -> Dict[str, Tensor]:
         ocr_out = self.ocr(image)
         ling = self.geo_ling(ipa_tokens)
-        prs = self.fusion(ocr_out["g"], ling)
+        assoc_bias = None
+        if associative_memory is not None and concept_ids is not None:
+            assoc_bias = _association_bias_from_memory(associative_memory, concept_ids)
+            if assoc_bias is not None:
+                assoc_bias = assoc_bias.to(device=ling.device, dtype=ling.dtype)
+        prs = self.fusion(ocr_out["g"], ling, assoc_bias=assoc_bias)
         decoded = self.prs_decoder(prs)
         semantic = self.semantic_head(prs)
         return {**ocr_out, "ling": ling, "prs": prs, "decoded": decoded, **semantic}
