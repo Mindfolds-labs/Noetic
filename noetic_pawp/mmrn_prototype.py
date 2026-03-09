@@ -15,12 +15,21 @@ from torch import Tensor, nn
 import torch.nn.functional as F
 
 
+def _validate_non_negative(name: str, value: float) -> None:
+    if value < 0:
+        raise ValueError(f"{name} deve ser >= 0 para manter combinação convexa parcial de perdas.")
+
+
 @dataclass
 class ProjectiveOCRConfig:
     image_size: int = 16
     num_classes: int = 10
     num_bezier_curves: int = 2
     geom_dim: int = 64
+    num_concepts: int = 128
+    num_attributes: int = 64
+    num_relations: int = 64
+    num_contexts: int = 32
 
 
 class PPNProjectivePreNormalizer(nn.Module):
@@ -189,6 +198,36 @@ class PRSDecoder(nn.Module):
         return self.net(prs)
 
 
+class SemanticNoeticHead(nn.Module):
+    """Cabeça semântica para modelar significado (conceito/atributo/relação/contexto).
+
+    Teoria -> implementação:
+    - conceito e contexto: classificação categórica (cross-entropy)
+    - atributos e relações: multi-rótulo (BCE com logits)
+    """
+
+    def __init__(self, prs_dim: int, num_concepts: int, num_attributes: int, num_relations: int, num_contexts: int) -> None:
+        super().__init__()
+        self.trunk = nn.Sequential(
+            nn.Linear(prs_dim, prs_dim),
+            nn.GELU(),
+            nn.LayerNorm(prs_dim),
+        )
+        self.concept_head = nn.Linear(prs_dim, num_concepts)
+        self.attribute_head = nn.Linear(prs_dim, num_attributes)
+        self.relation_head = nn.Linear(prs_dim, num_relations)
+        self.context_head = nn.Linear(prs_dim, num_contexts)
+
+    def forward(self, prs: Tensor) -> Dict[str, Tensor]:
+        h = self.trunk(prs)
+        return {
+            "concept_logits": self.concept_head(h),
+            "attribute_logits": self.attribute_head(h),
+            "relation_logits": self.relation_head(h),
+            "context_logits": self.context_head(h),
+        }
+
+
 class MMRNPrototype(nn.Module):
     def __init__(self, ocr_cfg: ProjectiveOCRConfig | None = None, prs_dim: int = 128) -> None:
         super().__init__()
@@ -197,23 +236,55 @@ class MMRNPrototype(nn.Module):
         self.geo_ling = GeoLinguisticEncoder(emb_dim=cfg.geom_dim)
         self.fusion = NoeticFusionEngine(geom_dim=cfg.geom_dim, lang_dim=cfg.geom_dim, prs_dim=prs_dim)
         self.prs_decoder = PRSDecoder(prs_dim=prs_dim)
+        self.semantic_head = SemanticNoeticHead(
+            prs_dim=prs_dim,
+            num_concepts=cfg.num_concepts,
+            num_attributes=cfg.num_attributes,
+            num_relations=cfg.num_relations,
+            num_contexts=cfg.num_contexts,
+        )
 
     def forward(self, image: Tensor, ipa_tokens: Tensor) -> Dict[str, Tensor]:
         ocr_out = self.ocr(image)
         ling = self.geo_ling(ipa_tokens)
         prs = self.fusion(ocr_out["g"], ling)
         decoded = self.prs_decoder(prs)
-        return {**ocr_out, "ling": ling, "prs": prs, "decoded": decoded}
+        semantic = self.semantic_head(prs)
+        return {**ocr_out, "ling": ling, "prs": prs, "decoded": decoded, **semantic}
 
 
 class ProjectiveOCRLoss(nn.Module):
     """Loss híbrida: cls + proj + contour + bezier(reg) + topologia."""
 
-    def __init__(self, lambda_cls: float = 1.0, lambda_proj: float = 0.2, lambda_contour: float = 0.5, lambda_bezier: float = 0.1, lambda_topo: float = 0.1) -> None:
+    def __init__(
+        self,
+        lambda_cls: float = 1.0,
+        lambda_proj: float = 0.2,
+        lambda_contour: float = 0.5,
+        lambda_bezier: float = 0.1,
+        lambda_topo: float = 0.1,
+        lambda_concept: float = 0.5,
+        lambda_attr: float = 0.3,
+        lambda_rel: float = 0.3,
+        lambda_ctx: float = 0.2,
+    ) -> None:
         super().__init__()
-        self.w = (lambda_cls, lambda_proj, lambda_contour, lambda_bezier, lambda_topo)
+        self.w = (lambda_cls, lambda_proj, lambda_contour, lambda_bezier, lambda_topo, lambda_concept, lambda_attr, lambda_rel, lambda_ctx)
+        for name, value in zip(("lambda_cls", "lambda_proj", "lambda_contour", "lambda_bezier", "lambda_topo", "lambda_concept", "lambda_attr", "lambda_rel", "lambda_ctx"), self.w):
+            _validate_non_negative(name, value)
 
-    def forward(self, out: Dict[str, Tensor], y: Tensor, contour_target: Tensor) -> Dict[str, Tensor]:
+    def _validate_semantic_targets(self, out: Dict[str, Tensor], semantic_targets: Dict[str, Tensor]) -> None:
+        batch = out["y_hat"].shape[0]
+        if "concept_id" in semantic_targets and semantic_targets["concept_id"].shape != (batch,):
+            raise ValueError("concept_id deve ter shape [B].")
+        if "context_id" in semantic_targets and semantic_targets["context_id"].shape != (batch,):
+            raise ValueError("context_id deve ter shape [B].")
+        if "attributes" in semantic_targets and semantic_targets["attributes"].shape != out["attribute_logits"].shape:
+            raise ValueError("attributes deve ter o mesmo shape de attribute_logits [B, A].")
+        if "relations" in semantic_targets and semantic_targets["relations"].shape != out["relation_logits"].shape:
+            raise ValueError("relations deve ter o mesmo shape de relation_logits [B, R].")
+
+    def forward(self, out: Dict[str, Tensor], y: Tensor, contour_target: Tensor, semantic_targets: Dict[str, Tensor] | None = None) -> Dict[str, Tensor]:
         l_cls = F.cross_entropy(out["y_hat"], y)
 
         eye = torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], device=out["theta"].device).view(1, 2, 3)
@@ -226,15 +297,50 @@ class ProjectiveOCRLoss(nn.Module):
         l_bezier = second_diff.square().mean()
 
         # Topologia aproximada: preservar massa de contorno para evitar quebra de conexões.
-        l_topo = (out["C_hat"].sum(dim=(1, 2, 3)) - contour_target.sum(dim=(1, 2, 3))).abs().mean() / contour_target[0].numel()
+        norm = float(contour_target.shape[1] * contour_target.shape[2] * contour_target.shape[3])
+        l_topo = (out["C_hat"].sum(dim=(1, 2, 3)) - contour_target.sum(dim=(1, 2, 3))).abs().mean() / max(norm, 1.0)
 
-        wt = self.w
-        total = wt[0] * l_cls + wt[1] * l_proj + wt[2] * l_contour + wt[3] * l_bezier + wt[4] * l_topo
-        return {
-            "total": total,
+        losses = {
             "L_cls": l_cls,
             "L_proj": l_proj,
             "L_contour": l_contour,
             "L_bezier": l_bezier,
             "L_topo": l_topo,
         }
+
+        l_concept = torch.zeros_like(l_cls)
+        l_attr = torch.zeros_like(l_cls)
+        l_rel = torch.zeros_like(l_cls)
+        l_ctx = torch.zeros_like(l_cls)
+        if semantic_targets is not None:
+            self._validate_semantic_targets(out, semantic_targets)
+            # Conceito/contexto são tarefas categóricas: ID único por amostra.
+            if "concept_id" in semantic_targets:
+                l_concept = F.cross_entropy(out["concept_logits"], semantic_targets["concept_id"])
+            if "context_id" in semantic_targets:
+                l_ctx = F.cross_entropy(out["context_logits"], semantic_targets["context_id"])
+
+            # Atributos/relações são multi-rótulo: vetor multi-hot por amostra.
+            if "attributes" in semantic_targets:
+                l_attr = F.binary_cross_entropy_with_logits(out["attribute_logits"], semantic_targets["attributes"].float())
+            if "relations" in semantic_targets:
+                l_rel = F.binary_cross_entropy_with_logits(out["relation_logits"], semantic_targets["relations"].float())
+
+        wt = self.w
+        total = (
+            wt[0] * l_cls
+            + wt[1] * l_proj
+            + wt[2] * l_contour
+            + wt[3] * l_bezier
+            + wt[4] * l_topo
+            + wt[5] * l_concept
+            + wt[6] * l_attr
+            + wt[7] * l_rel
+            + wt[8] * l_ctx
+        )
+        losses["total"] = total
+        losses["L_concept"] = l_concept
+        losses["L_attr"] = l_attr
+        losses["L_rel"] = l_rel
+        losses["L_ctx"] = l_ctx
+        return losses
