@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import sqrt
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 from noetic_pawp.tokenizer import PAWPTokenizer
 
@@ -100,3 +100,17 @@ class NoeticPyFoldsBridge:
             "adapted_attention_weights": self.attention_weights,
             "updated_cognitive_embeddings": feedback_embeddings,
         }
+
+    @staticmethod
+    def torch_to_dlpack(tensor: Any) -> Any:
+        """Exports a torch tensor as DLPack capsule for zero-copy hand-off."""
+        import torch
+
+        return torch.utils.dlpack.to_dlpack(tensor)
+
+    @staticmethod
+    def torch_from_dlpack(capsule: Any) -> Any:
+        """Imports a DLPack capsule into torch without copying underlying storage."""
+        import torch
+
+        return torch.utils.dlpack.from_dlpack(capsule)

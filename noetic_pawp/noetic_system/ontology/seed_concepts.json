@@ -1,0 +1,22 @@
+[
+  {
+    "concept_id": "concept.greeting.hello",
+    "aliases": {
+      "en": ["hello", "hi"],
+      "pt": ["olá", "oi"],
+      "es": ["hola"]
+    },
+    "unicode_variations": ["Olá", "Ola\u0301", "Ｈｅｌｌｏ"],
+    "ipa": "həˈloʊ"
+  },
+  {
+    "concept_id": "concept.food.coffee",
+    "aliases": {
+      "en": ["coffee"],
+      "pt": ["café"],
+      "fr": ["café"]
+    },
+    "unicode_variations": ["Cafe\u0301", "Ｃａｆｅ\u0301"],
+    "ipa": "kaˈfɛ"
+  }
+]
