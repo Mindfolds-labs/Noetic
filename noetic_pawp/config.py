@@ -37,9 +37,10 @@ class PAWPConfig:
     max_vocab_size: int = 5000
     feature_flags: FeatureFlags = field(default_factory=FeatureFlags)
     default_tokenizer_mode: TokenizerMode = TokenizerMode.MULTIMODAL
-    g2p_backend_priority: List[str] = field(
-        default_factory=lambda: ["epitran", "espeak", "fallback"]
-    )
+    # G2P backend ordering controls numerical behavior of IPA side-channel features.
+    # We keep a deterministic priority list so stochastic dependency availability
+    # does not alter cache identities or training/inference comparability.
+    g2p_backend_priority: List[str] = field(default_factory=lambda: ["epitran", "espeak", "fallback"])
 
 
 @dataclass

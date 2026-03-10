@@ -79,60 +79,53 @@ def _try_create_backend(name: str) -> G2PBackend | None:
             return EpitranBackend()
         except ModuleNotFoundError:
             return None
-
-    if name == "espeak":
+    if name in {"espeak", "espeak-ng"}:
         if shutil.which("espeak-ng"):
             return EspeakBackend()
         return None
-
-    if name == "fallback":
+    if name in {"fallback", "heuristic"}:
         return HeuristicFallbackBackend()
-
     return None
 
 
-def _resolve_priority(priority: tuple[str, ...] | None = None) -> tuple[str, ...]:
-    if priority is not None:
-        return priority
-    return tuple(PAWPConfig().g2p_backend_priority)
+def _normalize_backend_order(backend: str | Iterable[str]) -> tuple[str, ...]:
+    if isinstance(backend, str):
+        if backend == "auto":
+            return ("epitran", "espeak", "fallback")
+        return (backend.lower(),)
+    normalized = tuple(item.lower() for item in backend)
+    return normalized or ("fallback",)
 
 
-@lru_cache(maxsize=256)
-def _build_g2p_backend(priority: tuple[str, ...]) -> tuple[str, G2PBackend]:
-    for name in priority:
-        backend = _try_create_backend(name)
-        if backend is not None:
-            return name, backend
+def _to_backend_key(backends: tuple[str, ...]) -> str:
+    return "|".join(backends)
+
+
+def _select_backend(backends: tuple[str, ...]) -> tuple[str, G2PBackend]:
+    for name in backends:
+        instance = _load_backend(name)
+        if instance is not None:
+            resolved = "espeak" if name == "espeak-ng" else name
+            return resolved, instance
+    # Deterministic total fallback ensures convergence of IPA side-channel features.
     return "fallback", HeuristicFallbackBackend()
 
 
 @lru_cache(maxsize=8192)
-def _surface_to_ipa_cached(text: str, lang: str, backend_name: str) -> str:
-    resolved = _try_create_backend(backend_name)
-    if resolved is None:
-        resolved = HeuristicFallbackBackend()
-    return resolved.to_ipa(text, lang)
+def _surface_to_ipa_cached(text: str, lang: str, backend_key: str) -> str:
+    backend_order = tuple(item for item in backend_key.split("|") if item)
+    _, backend = _select_backend(backend_order)
+    return backend.to_ipa(text, lang)
 
 
 def surface_to_ipa(
     text: str,
     lang: str = "pt",
-    backend: str = "auto",
-    backend_priority: tuple[str, ...] | None = None,
+    backend: str | Iterable[str] = "auto",
 ) -> str:
-    resolved_name = backend
-    if backend == "auto":
-        selected_priority = _resolve_priority(backend_priority)
-        resolved_name, _ = _build_g2p_backend(selected_priority)
-
-    return _surface_to_ipa_cached(text, lang, resolved_name)
-
-
-@lru_cache(maxsize=8192)
-def _word_to_ipa_cached(word: str, language: str, backend_priority: tuple[str, ...]) -> str:
-    backend_name, _ = _build_g2p_backend(backend_priority)
-    # cache key is deterministic by (word, language, backend_name)
-    return _surface_to_ipa_cached(word, language, backend_name)
+    ordered_backends = _normalize_backend_order(backend)
+    backend_key = _to_backend_key(ordered_backends)
+    return _surface_to_ipa_cached(text, lang, backend_key)
 
 
 def word_to_ipa(word: str, language: str = "pt") -> str:
