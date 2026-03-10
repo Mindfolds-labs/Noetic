@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from typing import Deque, Optional
+import warnings
 
 try:
     import torch
@@ -14,8 +15,18 @@ from pawp.fusion import PAWPFusion
 
 try:  # optional integration path
     from core.attention.associative_attention import IsolatedAssociativeEncoderBlock
-except Exception:  # pragma: no cover
-    IsolatedAssociativeEncoderBlock = None
+except ModuleNotFoundError as exc:  # pragma: no cover
+    if exc.name and exc.name.startswith("core"):
+        IsolatedAssociativeEncoderBlock = None
+    else:
+        raise
+except ImportError as exc:  # pragma: no cover
+    warnings.warn(
+        f"Optional associative attention integration is unavailable: {exc}",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    raise
 
 
 class NoeticCognitiveCore(nn.Module):

@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import re
+import warnings
 import unicodedata
 from collections import Counter
 from typing import Dict, List, Tuple
 
 try:
     import regex as _regex  # type: ignore
-except ImportError:  # pragma: no cover - optional dependency
-    _regex = None
+except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+    if exc.name == "regex":
+        _regex = None
+    else:
+        raise
+except ImportError as exc:  # pragma: no cover - optional dependency
+    warnings.warn(f"Optional regex backend is unavailable: {exc}", RuntimeWarning, stacklevel=2)
+    raise
 
 
 SCRIPT_RANGES: Dict[str, Tuple[Tuple[int, int], ...]] = {
