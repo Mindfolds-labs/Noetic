@@ -1,4 +1,21 @@
 from dataclasses import dataclass
+from enum import Enum
+
+
+class TokenizerMode(str, Enum):
+    TEXT = "text"
+    AUDIO = "audio"
+    MULTIMODAL = "multimodal"
+
+    @classmethod
+    def from_value(cls, value: "TokenizerMode | str") -> "TokenizerMode":
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value)
+        except ValueError as exc:
+            allowed = ", ".join(mode.value for mode in cls)
+            raise ValueError(f"Invalid tokenizer mode '{value}'. Allowed: {allowed}") from exc
 
 
 @dataclass
@@ -14,6 +31,7 @@ class PAWPConfig:
     max_vocab_size: int = 5000
     min_frequency: int = 1
     default_language: str = "en"
+    default_tokenizer_mode: TokenizerMode = TokenizerMode.MULTIMODAL
 
 
 @dataclass

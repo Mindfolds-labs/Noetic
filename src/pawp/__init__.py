@@ -1,12 +1,13 @@
 """PAWP package."""
 
-from .config import CognitiveCoreConfig, FusionConfig, PAWPConfig
+from .config import CognitiveCoreConfig, FusionConfig, PAWPConfig, TokenizerMode
 from .tokenizer import CognitiveToken, PAWPToken, PAWPTokenizer, TokenAnalysis, compare_wordpiece_vs_pawp, review_alignment
 
 __all__ = [
     "CognitiveCoreConfig",
     "FusionConfig",
     "PAWPConfig",
+    "TokenizerMode",
     "CognitiveToken",
     "PAWPToken",
     "PAWPTokenizer",

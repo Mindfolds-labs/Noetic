@@ -4,13 +4,11 @@ import re
 import unicodedata
 from collections import Counter
 from functools import lru_cache
-from typing import Any, Dict, Iterable, List, Literal
+from typing import Any, Dict, Iterable, List
 
 from .align import align_subwords_to_ipa
-from .config import PAWPConfig, PAWPToken, TokenAnalysis
+from .config import PAWPConfig, PAWPToken, TokenAnalysis, TokenizerMode
 from .g2p import surface_to_ipa
-
-TokenizerMode = Literal["text", "audio", "multimodal"]
 
 NO_SPACE_SCRIPTS = ("THAI", "KHMER", "MYANMAR", "CJK", "HIRAGANA", "KATAKANA")
 
@@ -144,13 +142,19 @@ class PAWPTokenizer:
         self._wordpiece_tokenize_cached.cache_clear()
         self._infer_root_segments_cached.cache_clear()
 
-    def tokenize(self, text: str, language: str = "pt", mode: TokenizerMode = "text") -> List[TokenAnalysis]:
+    def tokenize(
+        self,
+        text: str,
+        language: str = "pt",
+        mode: TokenizerMode | str | None = None,
+    ) -> List[TokenAnalysis]:
+        resolved_mode = TokenizerMode.from_value(mode or self.config.default_tokenizer_mode)
         normalized = self.normalize(text)
         analyses: List[TokenAnalysis] = []
         for word in self.split_words(normalized):
             pieces = self.wordpiece_tokenize(word)
             ipa = ""
-            if mode in {"audio", "multimodal"}:
+            if resolved_mode in {TokenizerMode.AUDIO, TokenizerMode.MULTIMODAL}:
                 ipa = surface_to_ipa(word, lang=language)
             analyses.append(
                 TokenAnalysis(
@@ -159,7 +163,10 @@ class PAWPTokenizer:
                     pieces=pieces,
                     ipa=ipa,
                     root_segments=self.infer_root_segments(word),
-                    used_phonetic_bias=self.config.use_phonetic_hints,
+                    used_phonetic_bias=(
+                        self.config.use_phonetic_hints
+                        and resolved_mode in {TokenizerMode.AUDIO, TokenizerMode.MULTIMODAL}
+                    ),
                 )
             )
         return analyses
@@ -169,11 +176,13 @@ class PAWPTokenizer:
         text: str,
         language: str = "pt",
         attach_cn: bool = False,
-        mode: TokenizerMode = "text",
+        mode: TokenizerMode | str | None = None,
     ) -> List[PAWPToken]:
+        resolved_mode = TokenizerMode.from_value(mode or self.config.default_tokenizer_mode)
+        enable_audio = resolved_mode in {TokenizerMode.AUDIO, TokenizerMode.MULTIMODAL}
         tokens: List[PAWPToken] = []
-        for analysis in self.tokenize(text, language=language, mode=mode):
-            ipa_units = list(analysis.ipa)
+        for analysis in self.tokenize(text, language=language, mode=resolved_mode):
+            ipa_units = list(analysis.ipa) if enable_audio else []
             spans = align_subwords_to_ipa(analysis.pieces, ipa_units)
             script = _char_script(analysis.original_word[0]) if analysis.original_word else "OTHER"
             unicode_meta = {
@@ -185,7 +194,7 @@ class PAWPTokenizer:
             for idx, piece in enumerate(analysis.pieces):
                 start, end = spans[idx]
                 root_tag = analysis.root_segments[0] if analysis.root_segments else None
-                cn = [0.0] * 72 if attach_cn else None
+                cn = [0.0] * 72 if (attach_cn and enable_audio) else None
                 tokens.append(
                     PAWPToken(
                         wp_piece=piece,

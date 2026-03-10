@@ -1,7 +1,24 @@
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 from .feature_flags import FeatureFlags
+
+
+class TokenizerMode(str, Enum):
+    TEXT = "text"
+    AUDIO = "audio"
+    MULTIMODAL = "multimodal"
+
+    @classmethod
+    def from_value(cls, value: "TokenizerMode | str") -> "TokenizerMode":
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value)
+        except ValueError as exc:
+            allowed = ", ".join(mode.value for mode in cls)
+            raise ValueError(f"Invalid tokenizer mode '{value}'. Allowed: {allowed}") from exc
 
 
 @dataclass
@@ -19,6 +36,7 @@ class PAWPConfig:
     root_weight: float = 0.15
     max_vocab_size: int = 5000
     feature_flags: FeatureFlags = field(default_factory=FeatureFlags)
+    default_tokenizer_mode: TokenizerMode = TokenizerMode.MULTIMODAL
 
 
 @dataclass

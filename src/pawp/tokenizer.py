@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-from pawp.config import PAWPConfig
+from pawp.config import PAWPConfig, TokenizerMode
 from pawp.phonetics import PhoneticAdapter
 from pawp.roots import RootHeuristics
 from pawp.unicode_rules import PreTokenizer, UnicodeNormalizer
@@ -92,28 +92,44 @@ class PAWPTokenizer:
     def fit_vocab(self, texts: Iterable[str], min_freq: int = 1) -> Dict[str, int]:
         return self.train_vocab(texts, min_freq=min_freq)
 
-    def tokenize(self, text: str, language: Optional[str] = None) -> List[TokenAnalysis]:
+    def tokenize(
+        self,
+        text: str,
+        language: Optional[str] = None,
+        mode: TokenizerMode | str | None = None,
+    ) -> List[TokenAnalysis]:
         language = language or self.config.default_language
+        resolved_mode = TokenizerMode.from_value(mode or self.config.default_tokenizer_mode)
         normalized = self.normalizer.normalize(text)
         words = self.pretokenizer.split_words(normalized)
         analyses: List[TokenAnalysis] = []
         for word in words:
             pieces = self.wordpiece.split_word(word)
-            ipa = self.phonetic.word_to_ipa(word, language=language)
+            ipa = ""
+            if resolved_mode in {TokenizerMode.AUDIO, TokenizerMode.MULTIMODAL}:
+                ipa = self.phonetic.word_to_ipa(word, language=language)
             root = self.root_rules.extract(word, language=language)
             analyses.append(TokenAnalysis(word, word, pieces, ipa, root))
         return analyses
 
-    def encode(self, text: str, language: Optional[str] = None, attach_embedding: bool = False) -> List[CognitiveToken]:
+    def encode(
+        self,
+        text: str,
+        language: Optional[str] = None,
+        attach_embedding: bool = False,
+        mode: TokenizerMode | str | None = None,
+    ) -> List[CognitiveToken]:
         language = language or self.config.default_language
+        resolved_mode = TokenizerMode.from_value(mode or self.config.default_tokenizer_mode)
+        enable_audio = resolved_mode in {TokenizerMode.AUDIO, TokenizerMode.MULTIMODAL}
         encoded: List[CognitiveToken] = []
-        for analysis in self.tokenize(text, language=language):
+        for analysis in self.tokenize(text, language=language, mode=resolved_mode):
             for piece in analysis.pieces:
                 encoded.append(
                     CognitiveToken(
                         text=piece,
                         token_id=self.vocab.get(piece, self.vocab[self.config.unk_token]),
-                        ipa_representation=analysis.ipa,
+                        ipa_representation=analysis.ipa if enable_audio else "",
                         root=analysis.root,
                         language_hint=language,
                         embedding=[] if attach_embedding else None,
