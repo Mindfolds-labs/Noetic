@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -7,6 +8,15 @@ from pawp.config import PAWPConfig, TokenizerMode
 from pawp.phonetics import PhoneticAdapter
 from pawp.roots import RootHeuristics
 from pawp.unicode_rules import PreTokenizer, UnicodeNormalizer
+
+CONTROL_TOKENS_ORDER = ("unk_token", "cls_token", "sep_token", "pad_token", "mask_token")
+SCRIPT_SPECIAL_TOKENS = (
+    "[SCRIPT_LATIN]",
+    "[SCRIPT_CJK]",
+    "[SCRIPT_ARABIC]",
+    "[SCRIPT_OTHER]",
+)
+CULTURE_SPECIAL_TOKENS = ("[CULTURE_GLOBAL]", "[CULTURE_LOCAL]")
 
 
 @dataclass
@@ -62,13 +72,49 @@ class PAWPTokenizer:
         self.root_rules = RootHeuristics()
         self.phonetic = PhoneticAdapter()
         self.wordpiece = WordPieceOnlyView(prefix=self.config.wordpiece_prefix)
-        self.vocab: Dict[str, int] = {
-            self.config.unk_token: 0,
-            self.config.cls_token: 1,
-            self.config.sep_token: 2,
-            self.config.pad_token: 3,
-            self.config.mask_token: 4,
+        self.vocab: Dict[str, int] = self._init_vocab()
+
+    def _init_vocab(self) -> Dict[str, int]:
+        ordered_tokens = [getattr(self.config, attr) for attr in CONTROL_TOKENS_ORDER]
+        ordered_tokens.extend(SCRIPT_SPECIAL_TOKENS)
+        ordered_tokens.extend(CULTURE_SPECIAL_TOKENS)
+        return {token: idx for idx, token in enumerate(ordered_tokens)}
+
+    def _resolve_script_token(self, text: str) -> Optional[str]:
+        if not text:
+            return None
+        script_counts: Dict[str, int] = {}
+        for ch in text:
+            if ch.isspace():
+                continue
+            name = unicodedata.name(ch, "")
+            script = "OTHER"
+            if "LATIN" in name:
+                script = "LATIN"
+            elif "ARABIC" in name:
+                script = "ARABIC"
+            elif any(tag in name for tag in ("CJK", "HIRAGANA", "KATAKANA", "HAN")):
+                script = "CJK"
+            script_counts[script] = script_counts.get(script, 0) + 1
+        dominant = max(script_counts.items(), key=lambda item: item[1])[0] if script_counts else "OTHER"
+        token = f"[SCRIPT_{dominant}]"
+        return token if token in self.vocab else None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "vocab": dict(sorted(self.vocab.items(), key=lambda item: item[1])),
+            "special_tokens": {
+                "control": [getattr(self.config, attr) for attr in CONTROL_TOKENS_ORDER],
+                "script": list(SCRIPT_SPECIAL_TOKENS),
+                "culture": list(CULTURE_SPECIAL_TOKENS),
+            },
         }
+
+    def _resolve_culture_token(self, language: Optional[str]) -> Optional[str]:
+        if not language:
+            return None
+        token = "[CULTURE_LOCAL]" if language.lower() != self.config.default_language.lower() else "[CULTURE_GLOBAL]"
+        return token if token in self.vocab else None
 
     def train_vocab(self, texts: Iterable[str], min_freq: Optional[int] = None) -> Dict[str, int]:
         counter: Dict[str, int] = {}
@@ -123,7 +169,21 @@ class PAWPTokenizer:
         resolved_mode = TokenizerMode.from_value(mode or self.config.default_tokenizer_mode)
         enable_audio = resolved_mode in {TokenizerMode.AUDIO, TokenizerMode.MULTIMODAL}
         encoded: List[CognitiveToken] = []
-        for analysis in self.tokenize(text, language=language, mode=resolved_mode):
+        normalized = self.normalizer.normalize(text)
+        for special in (self._resolve_script_token(normalized), self._resolve_culture_token(language)):
+            if special is None:
+                continue
+            encoded.append(
+                CognitiveToken(
+                    text=special,
+                    token_id=self.vocab[special],
+                    ipa_representation="",
+                    root="",
+                    language_hint=language,
+                    embedding=[] if attach_embedding else None,
+                )
+            )
+        for analysis in self.tokenize(normalized, language=language, mode=resolved_mode):
             for piece in analysis.pieces:
                 encoded.append(
                     CognitiveToken(

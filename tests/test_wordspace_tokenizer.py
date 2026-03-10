@@ -130,3 +130,30 @@ def test_wordspace_offsets_stable_for_really_mixed_no_space_scripts() -> None:
     assert isinstance(payload, WordSpacePayload)
     assert payload.token_text == ["alphabetical", "ไ", "ท", "ย", "日", "本"]
     assert [text[s:e] for s, e in payload.token_offsets] == payload.token_text
+
+
+def test_noetic_vocab_serialization_contains_script_and_culture_tokens() -> None:
+    base = _baseline_tokenizer()
+    exported = base.to_dict()
+
+    assert exported["special_tokens"]["script"] == [
+        "[SCRIPT_LATIN]",
+        "[SCRIPT_CJK]",
+        "[SCRIPT_ARABIC]",
+        "[SCRIPT_HIRAGANA]",
+        "[SCRIPT_KATAKANA]",
+        "[SCRIPT_THAI]",
+        "[SCRIPT_KHMER]",
+        "[SCRIPT_MYANMAR]",
+        "[SCRIPT_OTHER]",
+    ]
+    assert exported["special_tokens"]["culture"] == ["[CULTURE_GLOBAL]", "[CULTURE_LOCAL]"]
+
+
+def test_noetic_encode_prefixes_metadata_tokens_when_available() -> None:
+    base = _baseline_tokenizer()
+    out = base.encode("pronúncia", language="pt", mode=TokenizerMode.TEXT)
+
+    assert len(out) >= 2
+    assert out[0].wp_piece.startswith("[SCRIPT_")
+    assert out[1].wp_piece == "[CULTURE_LOCAL]"
