@@ -94,3 +94,13 @@ else:
         "RIVEDepthLossConfig",
         "RIVEDepthLoss",
     ]
+
+try:
+    from noetic_pawp.interfaces import CognitiveOutput, NoeticCore
+except ImportError:  # optional torch dependency
+    pass
+else:
+    __all__ += [
+        "CognitiveOutput",
+        "NoeticCore",
+    ]
