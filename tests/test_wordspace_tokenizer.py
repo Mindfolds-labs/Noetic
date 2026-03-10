@@ -101,3 +101,18 @@ def test_invalid_mode_raises_for_noetic_tokenizer() -> None:
         assert "Invalid tokenizer mode" in str(exc)
     else:
         raise AssertionError("Expected ValueError for invalid mode")
+
+
+def test_wordspace_offsets_stable_for_multiscript_text() -> None:
+    base = _baseline_tokenizer()
+    base.fit_vocab(["abcไทย 日本語かなカナ"], min_freq=1)
+    base.config.feature_flags = FeatureFlags(enable_wordspace=True, enable_ipa_channel=False)
+    ws = WordSpaceTokenizer(tokenizer=base)
+
+    text = "abcไทย 日本語"
+    payload = ws.encode(text, language="pt")
+
+    assert isinstance(payload, WordSpacePayload)
+    assert payload.token_text == ["abc", "ไ", "ท", "ย", "日", "本", "語"]
+    assert payload.token_offsets == [(0, 3), (3, 4), (4, 5), (5, 6), (7, 8), (8, 9), (9, 10)]
+    assert [text[s:e] for s, e in payload.token_offsets] == payload.token_text
