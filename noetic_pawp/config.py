@@ -36,9 +36,12 @@ class PAWPToken:
     wp_piece: str
     wp_id: int
     ipa_units: List[str] = field(default_factory=list)
+    ipa_sequence: str = ""
     phoneme_spans: List[Tuple[int, int]] = field(default_factory=list)
     root_tag: Optional[str] = None
     lang: Optional[str] = None
+    script: str = "OTHER"
+    unicode_meta: Dict[str, Any] = field(default_factory=dict)
     cn: Optional[List[float]] = None
 
     def to_dict(self) -> Dict[str, Any]:
