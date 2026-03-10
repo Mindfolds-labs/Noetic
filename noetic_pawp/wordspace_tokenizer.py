@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, Union
 from .concept_normalizer import ConceptNormalizer
 
 from .ipa_encoder import align_text_ipa, ipa_to_ids, text_to_ipa
-from .config import PAWPConfig, PAWPToken
+from .config import PAWPConfig, PAWPToken, TokenizerMode
 from .tokenizer import PAWPTokenizer
 
 
@@ -62,7 +62,9 @@ class WordSpaceTokenizer:
             return self.tokenizer.encode(text, language=language, attach_cn=attach_cn)
 
         normalized = self.tokenizer.normalize(text)
-        analyses = self.tokenizer.tokenize(normalized, language=language)
+        # WordSpace computes IPA in its own channel; keep lexical tokenization in TEXT mode
+        # to avoid unnecessary backend coupling in the token contract.
+        analyses = self.tokenizer.tokenize(normalized, language=language, mode=TokenizerMode.TEXT)
         words = self.tokenizer.split_words_with_offsets(normalized)
 
         token_ids: List[int] = []

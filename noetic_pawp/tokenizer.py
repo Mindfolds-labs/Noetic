@@ -310,7 +310,7 @@ class PAWPTokenizer:
                 tokens.append(
                     PAWPToken(
                         wp_piece=piece,
-                        wp_id=self.vocab.get(piece, self.vocab[self.config.unk_token]),
+                        token_id=self.vocab.get(piece, self.vocab[self.config.unk_token]),
                         ipa_units=ipa_units[start:end],
                         ipa_sequence=ipa_sequence[start:end],
                         phoneme_spans=[(start, end)],

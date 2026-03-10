@@ -10,12 +10,21 @@ class _StubTokenizer:
     def encode(self, text: str, language: str = "pt", attach_cn: bool = False):
         del text, language, attach_cn
         return [
+            PAWPToken(wp_piece="ka", token_id=11, ipa_sequence="ka", script="LATIN", unicode_meta={"nfc": "ka"}),
+            PAWPToken(wp_piece="##ra", token_id=12, ipa_sequence="ɾa", script="LATIN", unicode_meta={"nfc": "ra"}),
+        ]
+
+
+class _LegacyStubTokenizer:
+    def encode(self, text: str, language: str = "pt", attach_cn: bool = False):
+        del text, language, attach_cn
+        return [
             PAWPToken(wp_piece="ka", wp_id=11, ipa_sequence="ka"),
             PAWPToken(wp_piece="##ra", wp_id=12, ipa_units=["ɾ", "a"]),
         ]
 
 
-def test_encode_text_accepts_minimal_pawp_token_contract() -> None:
+def test_encode_text_accepts_expanded_pawp_token_contract() -> None:
     encoder = PAWPEncoder(tokenizer=_StubTokenizer())
     points = encoder.encode_text("kara")
 
@@ -24,3 +33,11 @@ def test_encode_text_accepts_minimal_pawp_token_contract() -> None:
     assert all(point.phonetic_vector.ndim == 1 for point in points)
     assert all(point.syntactic_features.shape == (4,) for point in points)
     assert PAWPEncoder.validate_mapping(points)
+
+
+def test_encode_text_still_accepts_legacy_aliases() -> None:
+    encoder = PAWPEncoder(tokenizer=_LegacyStubTokenizer())
+    points = encoder.encode_text("kara")
+
+    assert len(points) == 2
+    assert all(point.syntactic_features[0].item() in {11.0, 12.0} for point in points)

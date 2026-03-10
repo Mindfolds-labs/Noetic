@@ -53,35 +53,61 @@ class TokenAnalysis:
     used_phonetic_bias: bool = False
 
 
-@dataclass
+@dataclass(init=False)
 class PAWPToken:
     wp_piece: str
-    wp_id: int
-    ipa_units: List[str] = field(default_factory=list)
-    ipa_sequence: str = ""
-    phoneme_spans: List[Tuple[int, int]] = field(default_factory=list)
-    root_tag: Optional[str] = None
-    lang: Optional[str] = None
-    script: str = "OTHER"
-    unicode_meta: Dict[str, Any] = field(default_factory=dict)
-    cn: Optional[List[float]] = None
+    token_id: int
+    ipa_sequence: str
+    script: str
+    unicode_meta: Dict[str, Any]
+    phoneme_spans: List[Tuple[int, int]]
+    root_tag: Optional[str]
+    lang: Optional[str]
+    cn: Optional[List[float]]
+    _ipa_units: List[str]
 
-    def __post_init__(self) -> None:
-        # Mantém a representação IPA consistente em ambos os formatos
-        # (sequência serial e unidades), preservando compatibilidade.
-        if not self.ipa_sequence and self.ipa_units:
-            self.ipa_sequence = "".join(self.ipa_units)
-        elif self.ipa_sequence and not self.ipa_units:
-            self.ipa_units = [ch for ch in self.ipa_sequence if not ch.isspace()]
+    def __init__(
+        self,
+        wp_piece: str,
+        token_id: int = 0,
+        ipa_sequence: str = "",
+        script: str = "OTHER",
+        unicode_meta: Optional[Dict[str, Any]] = None,
+        phoneme_spans: Optional[List[Tuple[int, int]]] = None,
+        root_tag: Optional[str] = None,
+        lang: Optional[str] = None,
+        cn: Optional[List[float]] = None,
+        # Compat aliases
+        wp_id: Optional[int] = None,
+        ipa_units: Optional[List[str]] = None,
+    ) -> None:
+        self.wp_piece = wp_piece
+        self.token_id = int(wp_id if wp_id is not None else token_id)
+        self.script = script
+        self.unicode_meta = unicode_meta or {}
+        self.phoneme_spans = list(phoneme_spans or [])
+        self.root_tag = root_tag
+        self.lang = lang
+        self.cn = cn
+
+        if not ipa_sequence and ipa_units:
+            ipa_sequence = "".join(ipa_units)
+        self.ipa_sequence = ipa_sequence
+        if ipa_units is not None:
+            self._ipa_units = [unit for unit in ipa_units if unit and not unit.isspace()]
+        elif ipa_sequence:
+            self._ipa_units = [ch for ch in ipa_sequence if not ch.isspace()]
+        else:
+            self._ipa_units = []
 
     @property
-    def token_id(self) -> int:
-        """Alias semântico para wp_id (compatibilidade progressiva)."""
-        return self.wp_id
+    def wp_id(self) -> int:
+        """Alias legado para o identificador de WordPiece."""
+        return self.token_id
 
-    @token_id.setter
-    def token_id(self, value: int) -> None:
-        self.wp_id = value
+    @wp_id.setter
+    def wp_id(self, value: int) -> None:
+        self.token_id = int(value)
 
     @property
     def text(self) -> str:
@@ -93,5 +119,20 @@ class PAWPToken:
         """Alias legado para a serialização IPA."""
         return self.ipa_sequence
 
+    @property
+    def ipa_units(self) -> List[str]:
+        """Alias legado para IPA em unidades discretas."""
+        return list(self._ipa_units)
+
+    @ipa_units.setter
+    def ipa_units(self, value: List[str]) -> None:
+        self._ipa_units = [unit for unit in value if unit and not unit.isspace()]
+        self.ipa_sequence = "".join(self._ipa_units)
+
+
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("_ipa_units", None)
+        data["wp_id"] = self.wp_id
+        data["ipa_units"] = self.ipa_units
+        return data

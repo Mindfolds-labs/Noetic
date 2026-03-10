@@ -53,7 +53,8 @@ class PAWPEncoder:
         tokens = self.tokenizer.encode(text, language=language, attach_cn=False)
         points: List[PAWPMultimodalPoint] = []
         for token in tokens:
-            ipa_ids = ipa_to_ids(token.ipa_sequence)
+            ipa_seq = getattr(token, "ipa_sequence", "") or ""
+            ipa_ids = ipa_to_ids(ipa_seq)
             points.append(
                 PAWPMultimodalPoint(
                     token=token.wp_piece,
@@ -62,10 +63,10 @@ class PAWPEncoder:
                     visual_vector=self._hash_vec(token.wp_piece[::-1], self.visual_dim),
                     syntactic_features=torch.tensor(
                         [
-                            float(token.wp_id),
-                            float(len(token.wp_piece)),
-                            float(len(token.ipa_units)),
-                            float(len(token.phoneme_spans)),
+                            float(getattr(token, "token_id", getattr(token, "wp_id", 0))),
+                            float(len(getattr(token, "wp_piece", getattr(token, "text", "")))),
+                            float(len(getattr(token, "ipa_units", []))),
+                            float(len(getattr(token, "phoneme_spans", []))),
                         ],
                         dtype=torch.float32,
                     ),
