@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from functools import lru_cache
-
+from typing import Iterable
 
 _PT_RULES = [
     (r"nh", "ɲ"),
@@ -30,7 +30,7 @@ class G2PBackend(ABC):
         raise NotImplementedError
 
 
-class FallbackBackend(G2PBackend):
+class HeuristicFallbackBackend(G2PBackend):
     def to_ipa(self, text: str, lang: str) -> str:
         w = text.lower()
         if lang.startswith("pt"):
@@ -72,22 +72,65 @@ class EspeakBackend(G2PBackend):
         return completed.stdout.strip().replace(" ", "")
 
 
-def _build_g2p_backend(preferred: str = "auto") -> G2PBackend:
-    if preferred in {"epitran", "auto"}:
+# Backward-compatible alias used by external importers.
+FallbackBackend = HeuristicFallbackBackend
+
+
+@lru_cache(maxsize=32)
+def _load_backend(name: str) -> G2PBackend | None:
+    name = name.lower()
+    if name == "epitran":
         try:
             return EpitranBackend()
         except ModuleNotFoundError:
-            pass
+            return None
+    if name in {"espeak", "espeak-ng"}:
+        if shutil.which("espeak-ng"):
+            return EspeakBackend()
+        return None
+    if name in {"fallback", "heuristic"}:
+        return HeuristicFallbackBackend()
+    return None
 
-    if preferred in {"espeak-ng", "auto"} and shutil.which("espeak-ng"):
-        return EspeakBackend()
 
-    return FallbackBackend()
+def _normalize_backend_order(backend: str | Iterable[str]) -> tuple[str, ...]:
+    if isinstance(backend, str):
+        if backend == "auto":
+            return ("epitran", "espeak", "fallback")
+        return (backend.lower(),)
+    normalized = tuple(item.lower() for item in backend)
+    return normalized or ("fallback",)
+
+
+def _to_backend_key(backends: tuple[str, ...]) -> str:
+    return "|".join(backends)
+
+
+def _select_backend(backends: tuple[str, ...]) -> tuple[str, G2PBackend]:
+    for name in backends:
+        instance = _load_backend(name)
+        if instance is not None:
+            resolved = "espeak" if name == "espeak-ng" else name
+            return resolved, instance
+    # Deterministic total fallback ensures convergence of IPA side-channel features.
+    return "fallback", HeuristicFallbackBackend()
 
 
 @lru_cache(maxsize=8192)
-def surface_to_ipa(text: str, lang: str = "pt", backend: str = "auto") -> str:
-    return _build_g2p_backend(preferred=backend).to_ipa(text, lang)
+def _surface_to_ipa_cached(text: str, lang: str, backend_key: str) -> str:
+    backend_order = tuple(item for item in backend_key.split("|") if item)
+    _, backend = _select_backend(backend_order)
+    return backend.to_ipa(text, lang)
+
+
+def surface_to_ipa(
+    text: str,
+    lang: str = "pt",
+    backend: str | Iterable[str] = "auto",
+) -> str:
+    ordered_backends = _normalize_backend_order(backend)
+    backend_key = _to_backend_key(ordered_backends)
+    return _surface_to_ipa_cached(text, lang, backend_key)
 
 
 def word_to_ipa(word: str, language: str = "pt") -> str:
