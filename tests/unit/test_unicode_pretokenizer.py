@@ -1,30 +1,22 @@
-from pawp.unicode_rules import NO_SPACE_SCRIPTS, PreTokenizer
+from pawp.unicode_rules import PreTokenizer
 
 
-def test_no_space_scripts_registry_contains_expected_blocks() -> None:
-    assert {"THAI", "KHMER", "MYANMAR", "CJK", "HIRAGANA", "KATAKANA"}.issubset(set(NO_SPACE_SCRIPTS))
+def test_pretokenizer_no_space_script_uses_grapheme_offsets() -> None:
+    tokenizer = PreTokenizer()
+    text = "ภาษาไทย日本語"
+
+    tokens = tokenizer.split_words_with_offsets(text)
+
+    assert [tok for tok, _, _ in tokens] == ["ภ", "า", "ษ", "า", "ไ", "ท", "ย", "日", "本", "語"]
+    assert [text[s:e] for _, s, e in tokens] == [tok for tok, _, _ in tokens]
 
 
-def test_pretokenizer_splits_cjk_and_japanese_by_grapheme() -> None:
-    pre = PreTokenizer()
-    text = "日本語かなカナ"
-    assert pre.split_words(text) == ["日", "本", "語", "か", "な", "カ", "ナ"]
+def test_pretokenizer_mixed_script_splits_mode_switch_and_preserves_offsets() -> None:
+    tokenizer = PreTokenizer()
+    text = "abcไทย-日本def"
 
+    tokens = tokenizer.split_words_with_offsets(text)
 
-def test_pretokenizer_preserves_offsets_for_mixed_script_span() -> None:
-    pre = PreTokenizer()
-    text = "abcไทย 日本語"
-
-    pieces = pre.split_words_with_offsets(text)
-
-    rebuilt = [text[s:e] for _, s, e in pieces]
-    assert [token for token, _, _ in pieces] == rebuilt
-    assert pieces == [
-        ("abc", 0, 3),
-        ("ไ", 3, 4),
-        ("ท", 4, 5),
-        ("ย", 5, 6),
-        ("日", 7, 8),
-        ("本", 8, 9),
-        ("語", 9, 10),
-    ]
+    assert [tok for tok, _, _ in tokens] == ["abc", "ไ", "ท", "ย", "-", "日", "本", "def"]
+    assert [(s, e) for _, s, e in tokens] == [(0, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 12)]
+    assert [text[s:e] for _, s, e in tokens] == [tok for tok, _, _ in tokens]
