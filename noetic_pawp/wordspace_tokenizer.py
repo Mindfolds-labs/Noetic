@@ -78,6 +78,8 @@ class WordSpaceTokenizer:
 
         for analysis, (_, start, end) in zip(analyses, words):
             ipa_sequence = text_to_ipa(analysis.original_word, language=language)
+            # Mantemos a forma serial para alinhamento e a forma em unidades para ids,
+            # espelhando o contrato PAWPToken (ipa_sequence + ipa_units).
             ipa_units = [ch for ch in ipa_sequence if not ch.isspace()]
             spans = align_text_ipa(analysis.pieces, ipa_sequence)
             piece_offsets = self._piece_offsets(start, analysis.pieces, end - start)

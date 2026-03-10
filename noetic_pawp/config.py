@@ -62,5 +62,32 @@ class PAWPToken:
     unicode_meta: Dict[str, Any] = field(default_factory=dict)
     cn: Optional[List[float]] = None
 
+    def __post_init__(self) -> None:
+        # Mantém a representação IPA consistente em ambos os formatos
+        # (sequência serial e unidades), preservando compatibilidade.
+        if not self.ipa_sequence and self.ipa_units:
+            self.ipa_sequence = "".join(self.ipa_units)
+        elif self.ipa_sequence and not self.ipa_units:
+            self.ipa_units = [ch for ch in self.ipa_sequence if not ch.isspace()]
+
+    @property
+    def token_id(self) -> int:
+        """Alias semântico para wp_id (compatibilidade progressiva)."""
+        return self.wp_id
+
+    @token_id.setter
+    def token_id(self, value: int) -> None:
+        self.wp_id = value
+
+    @property
+    def text(self) -> str:
+        """Alias legado usado por consumidores antigos."""
+        return self.wp_piece
+
+    @property
+    def ipa_representation(self) -> str:
+        """Alias legado para a serialização IPA."""
+        return self.ipa_sequence
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
