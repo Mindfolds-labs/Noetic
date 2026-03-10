@@ -31,6 +31,9 @@ class WordSpacePoint:
     metadata: Optional[dict[str, Any]] = None
     hyper_vec: Optional[Vector] = None
     phase: Optional[float] = None
+    core_identity: Optional[Vector] = None
+    context_state: Optional[Vector] = None
+    is_anchor: bool = False
 
     @staticmethod
     def _coerce_vector(name: str, value: TensorLike | None) -> Optional[Vector]:
@@ -49,8 +52,21 @@ class WordSpacePoint:
             coerced = self._coerce_vector(name, getattr(self, name))
             assert coerced is not None
             object.__setattr__(self, name, coerced)
-        for name in ("monitor_vec", "integrity_code", "hyper_vec"):
+        for name in ("monitor_vec", "integrity_code", "hyper_vec", "core_identity", "context_state"):
             object.__setattr__(self, name, self._coerce_vector(name, getattr(self, name)))
+        core_identity = self.core_identity if self.core_identity is not None else self.assoc_vec
+        context_state = self.context_state if self.context_state is not None else self.context_vec
+        object.__setattr__(self, "core_identity", core_identity)
+        object.__setattr__(self, "context_state", context_state)
+        if core_identity is not None and context_state is not None and len(core_identity) != len(context_state):
+            if len(core_identity) == 0:
+                core_identity = tuple(0.0 for _ in context_state)
+                object.__setattr__(self, "core_identity", core_identity)
+            elif len(context_state) == 0:
+                context_state = tuple(0.0 for _ in core_identity)
+                object.__setattr__(self, "context_state", context_state)
+            else:
+                raise ValueError("core_identity and context_state must have the same dimension")
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
@@ -74,6 +90,9 @@ class WordSpacePoint:
             "metadata": self.metadata,
             "hyper_vec": list(self.hyper_vec) if self.hyper_vec is not None else None,
             "phase": self.phase,
+            "core_identity": list(self.core_identity) if self.core_identity is not None else None,
+            "context_state": list(self.context_state) if self.context_state is not None else None,
+            "is_anchor": self.is_anchor,
         }
 
     @classmethod
@@ -92,7 +111,20 @@ class WordSpacePoint:
             metadata=data.get("metadata"),
             hyper_vec=tuple(data["hyper_vec"]) if data.get("hyper_vec") is not None else None,
             phase=data.get("phase"),
+            core_identity=tuple(data["core_identity"]) if data.get("core_identity") is not None else None,
+            context_state=tuple(data["context_state"]) if data.get("context_state") is not None else None,
+            is_anchor=bool(data.get("is_anchor", False)),
         )
+
+    @property
+    def concept_representation(self) -> Vector:
+        core = self.core_identity or ()
+        ctx = self.context_state or ()
+        if not core and not ctx:
+            return ()
+        if len(core) != len(ctx):
+            raise ValueError("core_identity and context_state dimensions must match")
+        return tuple(a + b for a, b in zip(core, ctx))
 
     @staticmethod
     def stack_vectors(points: Sequence["WordSpacePoint"], field: str):

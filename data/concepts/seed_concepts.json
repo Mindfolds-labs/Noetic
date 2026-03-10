@@ -2,21 +2,44 @@
   {
     "concept_id": "concept.greeting.hello",
     "aliases": {
-      "en": ["hello", "hi"],
-      "pt": ["olá", "oi"],
-      "es": ["hola"]
+      "en": [
+        "hello",
+        "hi"
+      ],
+      "pt": [
+        "olá",
+        "oi"
+      ],
+      "es": [
+        "hola"
+      ]
     },
-    "unicode_variations": ["Olá", "Ola\u0301", "Ｈｅｌｌｏ"],
-    "ipa": "həˈloʊ"
+    "unicode_variations": [
+      "Olá",
+      "Olá",
+      "Ｈｅｌｌｏ"
+    ],
+    "ipa": "həˈloʊ",
+    "is_anchor": true
   },
   {
     "concept_id": "concept.food.coffee",
     "aliases": {
-      "en": ["coffee"],
-      "pt": ["café"],
-      "fr": ["café"]
+      "en": [
+        "coffee"
+      ],
+      "pt": [
+        "café"
+      ],
+      "fr": [
+        "café"
+      ]
     },
-    "unicode_variations": ["Cafe\u0301", "Ｃａｆｅ\u0301"],
-    "ipa": "kaˈfɛ"
+    "unicode_variations": [
+      "Café",
+      "Ｃａｆｅ́"
+    ],
+    "ipa": "kaˈfɛ",
+    "is_anchor": true
   }
 ]

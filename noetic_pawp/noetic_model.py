@@ -6,18 +6,17 @@ from typing import Dict, Optional
 import torch
 from torch import Tensor, nn
 
+from noetic_pawp.controllers import (
+    ActionController,
+    BridgeController,
+    CognitiveController,
+    MemoryController,
+    PerceptionController,
+)
+
 
 @dataclass
 class NoeticPyFoldsConfig:
-    """Configuração do núcleo noético baseado em dinâmica dendrítica.
-
-    Parâmetros críticos:
-    - tau_mem ∈ (0, 1): fator de decaimento da membrana (estabilidade BIBO em regime discreto).
-    - tau_trace ∈ (0, 1): EMA para surpresa/intenção (evita oscilação em sinais ruidosos).
-    - spike_threshold: limiar de disparo; controla sparsidade e regime de atividade.
-    - surrogate_beta: inclinação da função surrogate; maior valor aproxima Heaviside com risco de gradiente instável.
-    """
-
     input_dim: int = 72
     hidden_dim: int = 128
     output_dim: int = 64
@@ -38,12 +37,6 @@ class NoeticPyFoldsConfig:
 
 
 class SurrogateSpike(torch.autograd.Function):
-    """Heaviside no forward com gradiente surrogate sigmoidal no backward.
-
-    Isso preserva interpretação de spike binário no estado direto,
-    mantendo fluxo de gradiente durante treino supervisionado.
-    """
-
     @staticmethod
     def forward(ctx, v_minus_theta: Tensor, beta: float) -> Tensor:  # type: ignore[override]
         ctx.save_for_backward(v_minus_theta)
@@ -60,16 +53,6 @@ class SurrogateSpike(torch.autograd.Function):
 
 
 class NoeticPyFoldsCore(nn.Module):
-    """Núcleo noético com estado recorrente inspirado no neurônio PyFolds.
-
-    Equações discretas implementadas:
-      v_t = tau_mem * v_{t-1} + W x_t
-      s_t = H(v_t - theta)                (com surrogate no treino)
-      r_t = tau_trace * r_{t-1} + (1-tau_trace) * |v_t - v̂_t|
-
-    Onde v̂_t é média por batch do potencial (baseline local), usada como sinal de surpresa.
-    """
-
     def __init__(self, cfg: Optional[NoeticPyFoldsConfig] = None) -> None:
         super().__init__()
         self.cfg = cfg or NoeticPyFoldsConfig()
@@ -78,8 +61,6 @@ class NoeticPyFoldsCore(nn.Module):
         self.in_proj = nn.Linear(self.cfg.input_dim, self.cfg.hidden_dim)
         self.out_proj = nn.Linear(self.cfg.hidden_dim, self.cfg.output_dim)
         self.norm = nn.LayerNorm(self.cfg.hidden_dim)
-
-        # Estado interno não-paramétrico (registrado para persistência/estado do módulo).
         self.register_buffer("membrane", torch.zeros(1, self.cfg.hidden_dim))
         self.register_buffer("surprise_trace", torch.zeros(1, self.cfg.hidden_dim))
 
@@ -88,12 +69,6 @@ class NoeticPyFoldsCore(nn.Module):
         self.surprise_trace = torch.zeros(batch_size, self.cfg.hidden_dim, device=device, dtype=dtype)
 
     def _needs_reset(self, batch_size: int, device: torch.device, dtype: torch.dtype) -> bool:
-        """Verifica se o estado interno está incompatível com o lote atual.
-
-        A comparação de `torch.device` é feita por representação textual para evitar
-        falsos negativos quando objetos equivalentes são construídos por caminhos diferentes.
-        """
-
         return (
             self.membrane.size(0) != batch_size
             or str(self.membrane.device) != str(device)
@@ -108,18 +83,9 @@ class NoeticPyFoldsCore(nn.Module):
         if reset_state or self._needs_reset(bsz, cn.device, cn.dtype):
             self.reset_state(bsz, cn.device, cn.dtype)
 
-        x = self.in_proj(cn)
-        x = self.norm(x)
-
-        # Dinâmica linear estável em norma para tau_mem < 1.
-        v = self.cfg.tau_mem * self.membrane + x
-
-        # Clipping suave evita explosão de estado em entradas fora de escala durante treino inicial.
-        v = torch.tanh(v)
-
-        # Spike binário com surrogate gradient.
+        x = self.norm(self.in_proj(cn))
+        v = torch.tanh(self.cfg.tau_mem * self.membrane + x)
         spikes = SurrogateSpike.apply(v - self.cfg.spike_threshold, self.cfg.surrogate_beta)
-
         baseline = v.mean(dim=0, keepdim=True)
         instant_surprise = (v - baseline).abs()
         surprise_trace = self.cfg.tau_trace * self.surprise_trace + (1.0 - self.cfg.tau_trace) * instant_surprise
@@ -128,7 +94,6 @@ class NoeticPyFoldsCore(nn.Module):
         self.surprise_trace = surprise_trace.detach()
 
         z_noetic = self.out_proj(spikes)
-
         return {
             "z_noetic": z_noetic,
             "spikes": spikes,
@@ -139,11 +104,7 @@ class NoeticPyFoldsCore(nn.Module):
 
 
 class NoeticMMRNBridge(nn.Module):
-    """Ponte mínima para integrar cn(72) -> núcleo noético -> espaço latente PRS.
-
-    Mantém compatibilidade com o pipeline atual: entrada geométrica (`cn`) e
-    saída latente (`prs`) para módulos superiores (fusão, decoder, classificação).
-    """
+    """Facade/orchestrator delegating responsibilities to modular controllers."""
 
     def __init__(self, prs_dim: int = 128, cfg: Optional[NoeticPyFoldsConfig] = None) -> None:
         super().__init__()
@@ -153,8 +114,23 @@ class NoeticMMRNBridge(nn.Module):
             nn.GELU(),
             nn.LayerNorm(prs_dim),
         )
+        self.perception = PerceptionController()
+        self.cognition = CognitiveController(self.core)
+        self.memory = MemoryController()
+        self.bridge = BridgeController(self.to_prs)
+        self.action = ActionController()
 
     def forward(self, cn: Tensor, *, reset_state: bool = False) -> Dict[str, Tensor]:
-        out = self.core(cn, reset_state=reset_state)
-        out["prs"] = self.to_prs(out["z_noetic"])
-        return out
+        perception_out = self.perception.prepare(cn)
+        cognition_state = self.cognition.run(perception_out, reset_state=reset_state)
+        memory_query = self.memory.query(cognition_state)
+        bridge_state = self.bridge.project(memory_query)
+        action_out = self.action.build(cognition_state, bridge_state)
+        return {
+            "prs": action_out.prs,
+            "z_noetic": action_out.z_noetic,
+            "spikes": action_out.spikes,
+            "membrane": action_out.membrane,
+            "surprise": action_out.surprise,
+            "surprise_trace": action_out.surprise_trace,
+        }
