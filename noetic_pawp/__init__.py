@@ -104,3 +104,22 @@ else:
         "CognitiveOutput",
         "NoeticCore",
     ]
+
+try:
+    from noetic_pawp.noetic_system import (
+        ActionController,
+        CognitiveController,
+        MemoryController,
+        NoeticSystem,
+        PerceptionController,
+    )
+except ImportError:
+    pass
+else:
+    __all__ += [
+        "NoeticSystem",
+        "PerceptionController",
+        "CognitiveController",
+        "MemoryController",
+        "ActionController",
+    ]
