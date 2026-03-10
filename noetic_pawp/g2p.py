@@ -5,7 +5,8 @@ import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from functools import lru_cache
-from typing import Iterable
+
+from .config import PAWPConfig
 
 _PT_RULES = [
     (r"nh", "ɲ"),
@@ -72,13 +73,7 @@ class EspeakBackend(G2PBackend):
         return completed.stdout.strip().replace(" ", "")
 
 
-# Backward-compatible alias used by external importers.
-FallbackBackend = HeuristicFallbackBackend
-
-
-@lru_cache(maxsize=32)
-def _load_backend(name: str) -> G2PBackend | None:
-    name = name.lower()
+def _try_create_backend(name: str) -> G2PBackend | None:
     if name == "epitran":
         try:
             return EpitranBackend()
@@ -135,4 +130,5 @@ def surface_to_ipa(
 
 def word_to_ipa(word: str, language: str = "pt") -> str:
     """Backwards-compatible API for IPA generation."""
-    return surface_to_ipa(word, lang=language, backend="auto")
+    priority = tuple(PAWPConfig().g2p_backend_priority)
+    return _word_to_ipa_cached(word, language, priority)

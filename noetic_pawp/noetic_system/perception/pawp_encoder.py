@@ -21,8 +21,8 @@ except ImportError:  # optional torch dependency
 
     torch = _TorchStub()
 
-from noetic_pawp.tokenizer import PAWPTokenizer
 from noetic_pawp.ipa_encoder import ipa_to_ids
+from noetic_pawp.tokenizer import PAWPTokenizer
 
 
 @dataclass
@@ -53,15 +53,20 @@ class PAWPEncoder:
         tokens = self.tokenizer.encode(text, language=language, attach_cn=False)
         points: List[PAWPMultimodalPoint] = []
         for token in tokens:
-            ipa_ids = ipa_to_ids(token.ipa_units)
+            ipa_ids = ipa_to_ids(token.ipa_sequence)
             points.append(
                 PAWPMultimodalPoint(
-                    token=token.text,
+                    token=token.wp_piece,
                     phonetic_vector=torch.tensor(ipa_ids, dtype=torch.float32),
                     semantic_vector=self._hash_vec(token.wp_piece, self.semantic_dim),
-                    visual_vector=self._hash_vec(token.text[::-1], self.visual_dim),
+                    visual_vector=self._hash_vec(token.wp_piece[::-1], self.visual_dim),
                     syntactic_features=torch.tensor(
-                        [float(token.start), float(token.end), float(len(token.text)), float(token.boundary)],
+                        [
+                            float(token.wp_id),
+                            float(len(token.wp_piece)),
+                            float(len(token.ipa_units)),
+                            float(len(token.phoneme_spans)),
+                        ],
                         dtype=torch.float32,
                     ),
                 )

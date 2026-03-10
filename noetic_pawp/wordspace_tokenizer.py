@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
@@ -33,10 +32,6 @@ class WordSpaceTokenizer:
         self.config = self.tokenizer.config
         self.concept_normalizer = concept_normalizer or ConceptNormalizer()
 
-
-    def _split_word_offsets(self, text: str) -> List[Tuple[str, int, int]]:
-        return [(m.group(0), m.start(), m.end()) for m in re.finditer(r"[\wÀ-ÿ]+", text, flags=re.UNICODE)]
-
     def _piece_offsets(self, word_start: int, pieces: List[str], word_len: int) -> List[Tuple[int, int]]:
         if not pieces:
             return []
@@ -68,7 +63,7 @@ class WordSpaceTokenizer:
 
         normalized = self.tokenizer.normalize(text)
         analyses = self.tokenizer.tokenize(normalized, language=language)
-        words = self._split_word_offsets(normalized)
+        words = self.tokenizer.split_words_with_offsets(normalized)
 
         token_ids: List[int] = []
         token_text: List[str] = []
@@ -78,6 +73,8 @@ class WordSpaceTokenizer:
 
         for analysis, (_, start, end) in zip(analyses, words):
             ipa_sequence = text_to_ipa(analysis.original_word, language=language)
+            # Mantemos a forma serial para alinhamento e a forma em unidades para ids,
+            # espelhando o contrato PAWPToken (ipa_sequence + ipa_units).
             ipa_units = [ch for ch in ipa_sequence if not ch.isspace()]
             spans = align_text_ipa(analysis.pieces, ipa_sequence)
             piece_offsets = self._piece_offsets(start, analysis.pieces, end - start)
