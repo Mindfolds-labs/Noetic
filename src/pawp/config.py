@@ -12,18 +12,31 @@ class PAWPConfig:
     mask_token: str = "[MASK]"
     wordpiece_prefix: str = "##"
     max_vocab_size: int = 5000
+    min_frequency: int = 1
+    default_language: str = "en"
 
 
 @dataclass
-class ModelConfig:
-    d_word: int = 128
-    d_ipa: int = 64
-    d_root: int = 32
-    d_lang: int = 16
-    d_cn: int = 16
-    d_model: int = 256
-    nhead: int = 4
-    num_layers: int = 2
+class FusionConfig:
+    text_vocab_size: int = 8192
+    phonetic_vocab_size: int = 1024
+    root_vocab_size: int = 2048
+    language_vocab_size: int = 64
+    text_dim: int = 96
+    phonetic_dim: int = 64
+    root_dim: int = 48
+    language_dim: int = 16
+    model_dim: int = 128
+    num_heads: int = 4
     dropout: float = 0.1
-    num_classes: int = 10
-    cn_dim: int = 8
+    pad_idx: int = 0
+
+
+@dataclass
+class CognitiveCoreConfig:
+    input_dim: int = 128
+    hidden_dim: int = 128
+    output_dim: int = 128
+    memory_slots: int = 32
+    episodic_decay: float = 0.95
+    attention_heads: int = 4
