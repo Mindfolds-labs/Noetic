@@ -4,11 +4,36 @@ import re
 import unicodedata
 from collections import Counter
 from functools import lru_cache
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Literal
 
 from .align import align_subwords_to_ipa
 from .config import PAWPConfig, PAWPToken, TokenAnalysis
-from .g2p import word_to_ipa
+from .g2p import surface_to_ipa
+
+TokenizerMode = Literal["text", "audio", "multimodal"]
+
+NO_SPACE_SCRIPTS = ("THAI", "KHMER", "MYANMAR", "CJK", "HIRAGANA", "KATAKANA")
+
+
+def _char_script(ch: str) -> str:
+    name = unicodedata.name(ch, "")
+    if "LATIN" in name:
+        return "LATIN"
+    if "ARABIC" in name:
+        return "ARABIC"
+    if "CJK" in name:
+        return "CJK"
+    if "HIRAGANA" in name:
+        return "HIRAGANA"
+    if "KATAKANA" in name:
+        return "KATAKANA"
+    if "THAI" in name:
+        return "THAI"
+    if "KHMER" in name:
+        return "KHMER"
+    if "MYANMAR" in name:
+        return "MYANMAR"
+    return "OTHER"
 
 
 class PAWPTokenizer:
@@ -20,6 +45,11 @@ class PAWPTokenizer:
             self.config.cls_token: 2,
             self.config.sep_token: 3,
             self.config.mask_token: 4,
+            "[SCRIPT_LATIN]": 5,
+            "[SCRIPT_CJK]": 6,
+            "[SCRIPT_ARABIC]": 7,
+            "[CULTURE_GLOBAL]": 8,
+            "[CULTURE_LOCAL]": 9,
         }
 
     def normalize(self, text: str) -> str:
@@ -29,7 +59,15 @@ class PAWPTokenizer:
         return text
 
     def split_words(self, text: str) -> List[str]:
-        return re.findall(r"[\wÀ-ÿ]+", text, flags=re.UNICODE)
+        tokens = re.findall(r"\S+", text, flags=re.UNICODE)
+        out: List[str] = []
+        for token in tokens:
+            scripts = {_char_script(ch) for ch in token if not ch.isspace()}
+            if scripts.intersection(NO_SPACE_SCRIPTS):
+                out.extend([ch for ch in token if not ch.isspace()])
+            else:
+                out.extend(re.findall(r"[\wÀ-ÿ]+", token, flags=re.UNICODE))
+        return out
 
     def fit_vocab(self, corpus: Iterable[str], min_freq: int = 2) -> None:
         counter: Counter[str] = Counter()
@@ -42,6 +80,9 @@ class PAWPTokenizer:
             if freq >= min_freq and piece not in self.vocab:
                 self.vocab[piece] = next_id
                 next_id += 1
+
+    def train_vocab(self, corpus: Iterable[str], min_freq: int = 2) -> None:
+        self.fit_vocab(corpus, min_freq=min_freq)
 
     def _candidate_pieces(self, word: str) -> List[str]:
         pieces = [word]
@@ -103,12 +144,14 @@ class PAWPTokenizer:
         self._wordpiece_tokenize_cached.cache_clear()
         self._infer_root_segments_cached.cache_clear()
 
-    def tokenize(self, text: str, language: str = "pt") -> List[TokenAnalysis]:
+    def tokenize(self, text: str, language: str = "pt", mode: TokenizerMode = "text") -> List[TokenAnalysis]:
         normalized = self.normalize(text)
         analyses: List[TokenAnalysis] = []
         for word in self.split_words(normalized):
             pieces = self.wordpiece_tokenize(word)
-            ipa = word_to_ipa(word, language=language)
+            ipa = ""
+            if mode in {"audio", "multimodal"}:
+                ipa = surface_to_ipa(word, lang=language)
             analyses.append(
                 TokenAnalysis(
                     original_word=word,
@@ -121,11 +164,23 @@ class PAWPTokenizer:
             )
         return analyses
 
-    def encode(self, text: str, language: str = "pt", attach_cn: bool = False) -> List[PAWPToken]:
+    def encode(
+        self,
+        text: str,
+        language: str = "pt",
+        attach_cn: bool = False,
+        mode: TokenizerMode = "text",
+    ) -> List[PAWPToken]:
         tokens: List[PAWPToken] = []
-        for analysis in self.tokenize(text, language=language):
+        for analysis in self.tokenize(text, language=language, mode=mode):
             ipa_units = list(analysis.ipa)
             spans = align_subwords_to_ipa(analysis.pieces, ipa_units)
+            script = _char_script(analysis.original_word[0]) if analysis.original_word else "OTHER"
+            unicode_meta = {
+                "nfc": unicodedata.normalize("NFC", analysis.original_word),
+                "script": script,
+                "codepoints": [ord(ch) for ch in analysis.original_word],
+            }
 
             for idx, piece in enumerate(analysis.pieces):
                 start, end = spans[idx]
@@ -136,9 +191,12 @@ class PAWPTokenizer:
                         wp_piece=piece,
                         wp_id=self.vocab.get(piece, self.vocab[self.config.unk_token]),
                         ipa_units=ipa_units[start:end],
+                        ipa_sequence="".join(ipa_units[start:end]),
                         phoneme_spans=[(start, end)],
                         root_tag=root_tag,
                         lang=language,
+                        script=script,
+                        unicode_meta=unicode_meta,
                         cn=cn,
                     )
                 )
