@@ -298,6 +298,7 @@ class PAWPTokenizer:
         tokens: List[PAWPToken] = []
         for analysis in self.tokenize(text, language=language, mode=resolved_mode):
             ipa_units = list(analysis.ipa) if enable_audio else []
+            ipa_sequence = "".join(ipa_units)
             spans = align_subwords_to_ipa(analysis.pieces, ipa_units)
             script = _char_script(analysis.original_word[0]) if analysis.original_word else "OTHER"
             unicode_meta = {
@@ -315,7 +316,7 @@ class PAWPTokenizer:
                         wp_piece=piece,
                         wp_id=self.vocab.get(piece, self.vocab[self.config.unk_token]),
                         ipa_units=ipa_units[start:end],
-                        ipa_sequence="".join(ipa_units[start:end]),
+                        ipa_sequence=ipa_sequence[start:end],
                         phoneme_spans=[(start, end)],
                         root_tag=root_tag,
                         lang=language,
