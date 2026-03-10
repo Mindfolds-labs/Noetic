@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List
 
 from .align import align_subwords_to_ipa
@@ -53,8 +54,17 @@ class PAWPTokenizer:
         return pieces
 
     def wordpiece_tokenize(self, word: str) -> List[str]:
-        if word in self.vocab:
-            return [word]
+        vocab_tuple = tuple(sorted(self.vocab.items()))
+        return list(self._wordpiece_tokenize_cached(word, vocab_tuple))
+
+    @staticmethod
+    @lru_cache(maxsize=8192)
+    def _wordpiece_tokenize_cached(word: str, vocab_tuple: tuple) -> tuple[str, ...]:
+        vocab = dict(vocab_tuple)
+        if word in vocab:
+            return (word,)
+
+        unk_token = next((token for token, idx in vocab.items() if idx == 1), "[UNK]")
 
         pieces: List[str] = []
         cursor = 0
@@ -64,25 +74,34 @@ class PAWPTokenizer:
             while end > cursor:
                 chunk = word[cursor:end]
                 piece = chunk if cursor == 0 else f"##{chunk}"
-                if piece in self.vocab:
+                if piece in vocab:
                     matched = piece
                     break
                 end -= 1
             if matched is None:
                 ch = word[cursor]
                 matched = ch if cursor == 0 else f"##{ch}"
-                if matched not in self.vocab:
-                    matched = self.config.unk_token
+                if matched not in vocab:
+                    matched = unk_token
             pieces.append(matched)
             cursor = end if end > cursor else cursor + 1
-        return pieces
+        return tuple(pieces)
 
     def infer_root_segments(self, word: str) -> List[str]:
-        suffixes = ["mente", "ção", "ções", "izar", "dade", "ismo"]
+        suffixes = ("mente", "ção", "ções", "izar", "dade", "ismo")
+        return list(self._infer_root_segments_cached(word, suffixes))
+
+    @staticmethod
+    @lru_cache(maxsize=4096)
+    def _infer_root_segments_cached(word: str, suffixes: tuple[str, ...]) -> tuple[str, ...]:
         for suf in suffixes:
             if word.endswith(suf) and len(word) > len(suf) + 2:
-                return [word[: -len(suf)], suf]
-        return [word]
+                return (word[: -len(suf)], suf)
+        return (word,)
+
+    def clear_caches(self) -> None:
+        self._wordpiece_tokenize_cached.cache_clear()
+        self._infer_root_segments_cached.cache_clear()
 
     def tokenize(self, text: str, language: str = "pt") -> List[TokenAnalysis]:
         normalized = self.normalize(text)
