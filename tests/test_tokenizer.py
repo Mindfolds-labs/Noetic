@@ -13,9 +13,11 @@ def _build_tokenizer() -> PAWPTokenizer:
 def test_encode_produces_cognitive_tokens() -> None:
     tok = _build_tokenizer()
     out = tok.encode("karaokê", language="pt")
+    lexical = [item for item in out if not item.text.startswith("[")]
     assert out
     assert all(item.text for item in out)
-    assert all(item.ipa_representation for item in out)
+    assert lexical
+    assert all(item.ipa_representation for item in lexical)
 
 
 def test_tokenizer_modes_contract() -> None:
@@ -55,3 +57,25 @@ def test_compare_structure() -> None:
     assert "wordpiece_only" in row
     assert "pawp" in row
     assert row["pawp"]
+
+
+def test_vocab_serialization_contains_script_and_culture_tokens() -> None:
+    tok = _build_tokenizer()
+    exported = tok.to_dict()
+
+    assert exported["special_tokens"]["script"] == [
+        "[SCRIPT_LATIN]",
+        "[SCRIPT_CJK]",
+        "[SCRIPT_ARABIC]",
+        "[SCRIPT_OTHER]",
+    ]
+    assert exported["special_tokens"]["culture"] == ["[CULTURE_GLOBAL]", "[CULTURE_LOCAL]"]
+
+
+def test_encode_prefixes_metadata_tokens_when_available() -> None:
+    tok = _build_tokenizer()
+    out = tok.encode("hello mundo", language="pt")
+
+    assert len(out) >= 2
+    assert out[0].text.startswith("[SCRIPT_")
+    assert out[1].text == "[CULTURE_LOCAL]"

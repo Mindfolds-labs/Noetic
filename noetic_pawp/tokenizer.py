@@ -25,6 +25,19 @@ SCRIPT_RANGES: Dict[str, Tuple[Tuple[int, int], ...]] = {
 }
 
 NO_SPACE_SCRIPTS = tuple(SCRIPT_RANGES.keys())
+CONTROL_TOKENS_ORDER = ("pad_token", "unk_token", "cls_token", "sep_token", "mask_token")
+SCRIPT_SPECIAL_TOKENS = (
+    "[SCRIPT_LATIN]",
+    "[SCRIPT_CJK]",
+    "[SCRIPT_ARABIC]",
+    "[SCRIPT_HIRAGANA]",
+    "[SCRIPT_KATAKANA]",
+    "[SCRIPT_THAI]",
+    "[SCRIPT_KHMER]",
+    "[SCRIPT_MYANMAR]",
+    "[SCRIPT_OTHER]",
+)
+CULTURE_SPECIAL_TOKENS = ("[CULTURE_GLOBAL]", "[CULTURE_LOCAL]")
 
 
 def _script_from_codepoint(cp: int) -> str:
@@ -163,17 +176,35 @@ def _split_standard_span(span: str, absolute_start: int) -> List[Tuple[str, int,
 class PAWPTokenizer:
     def __init__(self, config: PAWPConfig | None = None) -> None:
         self.config = config or PAWPConfig()
-        self.vocab: Dict[str, int] = {
-            self.config.pad_token: 0,
-            self.config.unk_token: 1,
-            self.config.cls_token: 2,
-            self.config.sep_token: 3,
-            self.config.mask_token: 4,
-            "[SCRIPT_LATIN]": 5,
-            "[SCRIPT_CJK]": 6,
-            "[SCRIPT_ARABIC]": 7,
-            "[CULTURE_GLOBAL]": 8,
-            "[CULTURE_LOCAL]": 9,
+        self.vocab = self._init_vocab()
+
+    def _init_vocab(self) -> Dict[str, int]:
+        ordered_tokens = [getattr(self.config, attr) for attr in CONTROL_TOKENS_ORDER]
+        ordered_tokens.extend(SCRIPT_SPECIAL_TOKENS)
+        ordered_tokens.extend(CULTURE_SPECIAL_TOKENS)
+        return {token: idx for idx, token in enumerate(ordered_tokens)}
+
+    def _resolve_script_token(self, text: str) -> str | None:
+        dominant_script = _dominant_script(text)
+        candidate = f"[SCRIPT_{dominant_script}]"
+        return candidate if candidate in self.vocab else None
+
+    def _resolve_culture_token(self, language: str | None) -> str | None:
+        if not language:
+            return None
+        normalized = language.lower()
+        is_local = normalized.startswith("pt")
+        token = "[CULTURE_LOCAL]" if is_local else "[CULTURE_GLOBAL]"
+        return token if token in self.vocab else None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "vocab": dict(sorted(self.vocab.items(), key=lambda item: item[1])),
+            "special_tokens": {
+                "control": [getattr(self.config, attr) for attr in CONTROL_TOKENS_ORDER],
+                "script": list(SCRIPT_SPECIAL_TOKENS),
+                "culture": list(CULTURE_SPECIAL_TOKENS),
+            },
         }
 
     def normalize(self, text: str) -> str:
@@ -312,8 +343,31 @@ class PAWPTokenizer:
     ) -> List[PAWPToken]:
         resolved_mode = TokenizerMode.from_value(mode or self.config.default_tokenizer_mode)
         enable_audio = resolved_mode in {TokenizerMode.AUDIO, TokenizerMode.MULTIMODAL}
+        normalized = self.normalize(text)
         tokens: List[PAWPToken] = []
-        for analysis in self.tokenize(text, language=language, mode=resolved_mode):
+        metadata_tokens = [
+            self._resolve_script_token(normalized),
+            self._resolve_culture_token(language),
+        ]
+        for special in metadata_tokens:
+            if special is None:
+                continue
+            tokens.append(
+                PAWPToken(
+                    wp_piece=special,
+                    wp_id=self.vocab[special],
+                    ipa_units=[],
+                    ipa_sequence="",
+                    phoneme_spans=[],
+                    root_tag=None,
+                    lang=language,
+                    script="OTHER",
+                    unicode_meta={"type": "metadata"},
+                    cn=None,
+                )
+            )
+
+        for analysis in self.tokenize(normalized, language=language, mode=resolved_mode):
             ipa_units = list(analysis.ipa) if enable_audio else []
             ipa_sequence = "".join(ipa_units)
             spans = align_subwords_to_ipa(analysis.pieces, ipa_units)
