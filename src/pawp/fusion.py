@@ -1,42 +1,55 @@
 from __future__ import annotations
 
-try:
-    import torch
-    from torch import nn
-except ImportError as exc:  # pragma: no cover
-    raise ImportError("PAWPFusion requires PyTorch. Install with `pip install torch`.") from exc
+import torch
+from torch import Tensor, nn
 
 
 class PAWPFusion(nn.Module):
+    """Multimodal fusion block for text/phonetic/root/language signals."""
+
     def __init__(
         self,
-        word_vocab_size: int,
-        ipa_vocab_size: int,
+        text_vocab_size: int,
+        phonetic_vocab_size: int,
         root_vocab_size: int,
-        lang_vocab_size: int,
-        d_word: int = 128,
-        d_ipa: int = 64,
-        d_root: int = 32,
-        d_lang: int = 16,
-        d_cn: int = 16,
-        d_model: int = 256,
-        cn_dim: int = 8,
+        language_vocab_size: int,
+        text_dim: int = 96,
+        phonetic_dim: int = 64,
+        root_dim: int = 48,
+        language_dim: int = 16,
+        model_dim: int = 128,
+        num_heads: int = 4,
         pad_idx: int = 0,
+        dropout: float = 0.1,
     ) -> None:
         super().__init__()
-        self.word_emb = nn.Embedding(word_vocab_size, d_word, padding_idx=pad_idx)
-        self.ipa_emb = nn.Embedding(ipa_vocab_size, d_ipa, padding_idx=pad_idx)
-        self.root_emb = nn.Embedding(root_vocab_size, d_root, padding_idx=pad_idx)
-        self.lang_emb = nn.Embedding(lang_vocab_size, d_lang, padding_idx=pad_idx)
-        self.cn_proj = nn.Linear(cn_dim, d_cn)
-        self.proj = nn.Linear(d_word + d_ipa + d_root + d_lang + d_cn, d_model)
-        self.norm = nn.LayerNorm(d_model)
+        self.text_embedding = nn.Embedding(text_vocab_size, text_dim, padding_idx=pad_idx)
+        self.phonetic_embedding = nn.Embedding(phonetic_vocab_size, phonetic_dim, padding_idx=pad_idx)
+        self.root_embedding = nn.Embedding(root_vocab_size, root_dim, padding_idx=pad_idx)
+        self.language_embedding = nn.Embedding(language_vocab_size, language_dim, padding_idx=pad_idx)
 
-    def forward(self, wp_ids, ipa_ids, root_ids, lang_ids, cn_feats):
-        e_word = self.word_emb(wp_ids)
-        e_ipa = self.ipa_emb(ipa_ids)
-        e_root = self.root_emb(root_ids)
-        e_lang = self.lang_emb(lang_ids)
-        e_cn = self.cn_proj(cn_feats)
-        fused = torch.cat([e_word, e_ipa, e_root, e_lang, e_cn], dim=-1)
-        return self.norm(self.proj(fused))
+        self.text_proj = nn.Linear(text_dim, model_dim)
+        self.phonetic_proj = nn.Linear(phonetic_dim, model_dim)
+        self.root_proj = nn.Linear(root_dim, model_dim)
+        self.language_proj = nn.Linear(language_dim, model_dim)
+
+        self.attention = nn.MultiheadAttention(model_dim, num_heads, dropout=dropout, batch_first=True)
+        self.norm = nn.LayerNorm(model_dim)
+        self.out = nn.Linear(model_dim, model_dim)
+
+    def forward(self, text_ids: Tensor, phonetic_ids: Tensor, root_ids: Tensor, language_ids: Tensor) -> Tensor:
+        modalities = torch.stack(
+            [
+                self.text_proj(self.text_embedding(text_ids)),
+                self.phonetic_proj(self.phonetic_embedding(phonetic_ids)),
+                self.root_proj(self.root_embedding(root_ids)),
+                self.language_proj(self.language_embedding(language_ids)),
+            ],
+            dim=2,
+        )  # [B, T, 4, D]
+
+        batch, seq_len, modal_count, dim = modalities.shape
+        flattened = modalities.reshape(batch * seq_len, modal_count, dim)
+        attended, _ = self.attention(flattened, flattened, flattened, need_weights=False)
+        fused = attended.mean(dim=1).reshape(batch, seq_len, dim)
+        return self.out(self.norm(fused))
