@@ -155,7 +155,11 @@ class PAWPTokenizer:
             pieces = self.wordpiece_tokenize(word)
             ipa = ""
             if resolved_mode in {TokenizerMode.AUDIO, TokenizerMode.MULTIMODAL}:
-                ipa = surface_to_ipa(word, lang=language)
+                ipa = surface_to_ipa(
+                    word,
+                    lang=language,
+                    backend_priority=tuple(self.config.g2p_backend_priority),
+                )
             analyses.append(
                 TokenAnalysis(
                     original_word=word,
