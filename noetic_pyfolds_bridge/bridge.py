@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from math import sqrt
 from typing import Any, Dict, List, Sequence
@@ -22,9 +23,30 @@ class NeuralState:
     surprise_trace: List[float]
 
 
-class NoeticPyFoldsBridge:
-    """Bridge from symbolic cognition (Noetic) to neural activity (PyFolds-like)."""
+@dataclass(frozen=True)
+class BridgeProfile:
+    transfer_time_ms: float
+    copy_count: int
+    bytes_transferred: int
+    used_dlpack: bool
+    serialization_fallback: bool
 
+
+class BridgeProfiler:
+    def __init__(self) -> None:
+        self.last_profile = BridgeProfile(0.0, 0, 0, False, False)
+
+    def record(self, *, started_at: float, bytes_transferred: int, used_dlpack: bool, copy_count: int = 0, serialization_fallback: bool = False) -> None:
+        self.last_profile = BridgeProfile(
+            transfer_time_ms=(time.perf_counter() - started_at) * 1000.0,
+            copy_count=copy_count,
+            bytes_transferred=bytes_transferred,
+            used_dlpack=used_dlpack,
+            serialization_fallback=serialization_fallback,
+        )
+
+
+class NoeticPyFoldsBridge:
     def __init__(self, embedding_dim: int = 16, surprise_lr: float = 0.1) -> None:
         if embedding_dim < 4:
             raise ValueError("embedding_dim must be >= 4")
@@ -34,6 +56,7 @@ class NoeticPyFoldsBridge:
         self.attention_weights = [1.0 for _ in range(embedding_dim)]
         self._spike_threshold = 0.5
         self._surprise_history: List[float] = []
+        self.profiler = BridgeProfiler()
 
     def encode_text(self, text: str, language: str = "pt") -> SymbolicState:
         tokens = self.tokenizer.encode(text, language=language, attach_cn=False)
@@ -102,15 +125,46 @@ class NoeticPyFoldsBridge:
         }
 
     @staticmethod
-    def torch_to_dlpack(tensor: Any) -> Any:
-        """Exports a torch tensor as DLPack capsule for zero-copy hand-off."""
+    def validate_tensor_handoff(
+        tensor: Any,
+        *,
+        expected_shape: tuple[int, ...] | None = None,
+        expected_dtype: Any | None = None,
+        expected_device: str | None = None,
+        require_contiguous: bool = True,
+    ) -> None:
         import torch
 
+        if not isinstance(tensor, torch.Tensor):
+            raise TypeError("handoff payload must be a torch.Tensor")
+        if expected_shape is not None and tuple(tensor.shape) != expected_shape:
+            raise ValueError(f"shape mismatch: expected {expected_shape}, got {tuple(tensor.shape)}")
+        if expected_dtype is not None and tensor.dtype != expected_dtype:
+            raise ValueError(f"dtype mismatch: expected {expected_dtype}, got {tensor.dtype}")
+        if expected_device is not None and str(tensor.device) != expected_device:
+            raise ValueError(f"device mismatch: expected {expected_device}, got {tensor.device}")
+        if require_contiguous and not tensor.is_contiguous():
+            raise ValueError("tensor must be contiguous for bridge handoff")
+
+    @staticmethod
+    def torch_to_dlpack(tensor: Any) -> Any:
+        import torch
+
+        NoeticPyFoldsBridge.validate_tensor_handoff(tensor)
         return torch.utils.dlpack.to_dlpack(tensor)
 
     @staticmethod
     def torch_from_dlpack(capsule: Any) -> Any:
-        """Imports a DLPack capsule into torch without copying underlying storage."""
         import torch
 
         return torch.utils.dlpack.from_dlpack(capsule)
+
+    def transfer_torch_tensor(self, tensor: Any) -> Any:
+        import torch
+
+        self.validate_tensor_handoff(tensor)
+        start = time.perf_counter()
+        cap = torch.utils.dlpack.to_dlpack(tensor)
+        out = torch.utils.dlpack.from_dlpack(cap)
+        self.profiler.record(started_at=start, bytes_transferred=tensor.numel() * tensor.element_size(), used_dlpack=True)
+        return out

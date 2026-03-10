@@ -1,3 +1,3 @@
-from .bridge import NeuralState, NoeticPyFoldsBridge, SymbolicState
+from .bridge import BridgeProfile, BridgeProfiler, NeuralState, NoeticPyFoldsBridge, SymbolicState
 
-__all__ = ["SymbolicState", "NeuralState", "NoeticPyFoldsBridge"]
+__all__ = ["SymbolicState", "NeuralState", "NoeticPyFoldsBridge", "BridgeProfiler", "BridgeProfile"]

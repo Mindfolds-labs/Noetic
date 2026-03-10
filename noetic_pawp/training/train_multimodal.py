@@ -10,6 +10,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 from noetic_pawp.leibreg_bridge import NoeticLeibregBridge
+from core.wordspace.semantic_losses import SemanticStabilityLoss
+from core.wordspace.semantic_drift_monitor import SemanticDriftMonitor
 
 
 class MultimodalDataset(Dataset):
@@ -51,6 +53,7 @@ class MultimodalTrainer:
         batch_size: int = 32,
         learning_rate: float = 1e-4,
         device: str = "cpu",
+        semantic_stability_weight: float = 0.0,
     ) -> None:
         self.device = device
         self.bridge = bridge.to(device)
@@ -63,7 +66,10 @@ class MultimodalTrainer:
             if val_dataset
             else None
         )
-        self.history = {"train_loss": [], "val_loss": [], "epochs": []}
+        self.history = {"train_loss": [], "val_loss": [], "epochs": [], "semantic_drift_index": []}
+        self.semantic_stability_weight = semantic_stability_weight
+        self.semantic_stability_loss = SemanticStabilityLoss()
+        self.semantic_drift_monitor = SemanticDriftMonitor(knn_k=2)
 
     def _collate_fn(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         out: Dict[str, Any] = {"texts": [x["text"] for x in batch], "concepts": [x["concept"] for x in batch]}
@@ -94,6 +100,9 @@ class MultimodalTrainer:
             if count == 0:
                 continue
             batch_loss = loss_acc / count
+            if self.semantic_stability_weight > 0 and hasattr(self.bridge, "current_anchor_embeddings") and hasattr(self.bridge, "initial_anchor_embeddings"):
+                stability = self.semantic_stability_loss(self.bridge.current_anchor_embeddings(), self.bridge.initial_anchor_embeddings())
+                batch_loss = batch_loss + self.semantic_stability_weight * stability
             batch_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.bridge.parameters(), 1.0)
             self.optimizer.step()
@@ -122,6 +131,11 @@ class MultimodalTrainer:
             _ = time.time()
             train_loss = self.train_epoch()
             val_loss = self.validate()
+            if hasattr(self.bridge, "current_anchor_embeddings") and hasattr(self.bridge, "initial_anchor_embeddings"):
+                metrics = self.semantic_drift_monitor.measure(self.bridge.current_anchor_embeddings(), self.bridge.initial_anchor_embeddings())
+                self.history["semantic_drift_index"].append(metrics.semantic_drift_index)
+            else:
+                self.history["semantic_drift_index"].append(0.0)
             self.history["train_loss"].append(train_loss)
             self.history["val_loss"].append(val_loss)
             self.history["epochs"].append(epoch + 1)
