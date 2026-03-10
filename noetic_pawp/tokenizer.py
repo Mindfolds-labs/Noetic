@@ -10,6 +10,11 @@ from .align import align_subwords_to_ipa
 from .config import PAWPConfig, PAWPToken, TokenAnalysis, TokenizerMode
 from .g2p import surface_to_ipa
 
+try:
+    import regex as _regex  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    _regex = None
+
 SCRIPT_RANGES: Dict[str, Tuple[Tuple[int, int], ...]] = {
     "THAI": ((0x0E00, 0x0E7F),),
     "KHMER": ((0x1780, 0x17FF), (0x19E0, 0x19FF)),
@@ -22,11 +27,18 @@ SCRIPT_RANGES: Dict[str, Tuple[Tuple[int, int], ...]] = {
 NO_SPACE_SCRIPTS = tuple(SCRIPT_RANGES.keys())
 
 
-def _char_script(ch: str) -> str:
-    cp = ord(ch)
+def _script_from_codepoint(cp: int) -> str:
     for script, ranges in SCRIPT_RANGES.items():
         if any(start <= cp <= end for start, end in ranges):
             return script
+    return "OTHER"
+
+
+def _char_script(ch: str) -> str:
+    cp = ord(ch)
+    script = _script_from_codepoint(cp)
+    if script != "OTHER":
+        return script
 
     name = unicodedata.name(ch, "")
     if "LATIN" in name:
@@ -58,6 +70,8 @@ def _dominant_script(text: str) -> str:
 def _iter_graphemes(text: str) -> List[Tuple[str, int, int]]:
     if not text:
         return []
+    if _regex is not None:
+        return [(match.group(0), match.start(), match.end()) for match in _regex.finditer(r"\X", text)]
     graphemes: List[Tuple[str, int, int]] = []
     start = 0
     idx = 0
@@ -79,6 +93,13 @@ def _iter_graphemes(text: str) -> List[Tuple[str, int, int]]:
 
 
 def _split_no_space_span(span: str, absolute_start: int) -> List[Tuple[str, int, int]]:
+    if _regex is not None:
+        return [
+            (match.group(0), absolute_start + match.start(), absolute_start + match.end())
+            for match in _regex.finditer(r"\X", span)
+            if not match.group(0).isspace()
+        ]
+
     tokens: List[Tuple[str, int, int]] = []
     for grapheme, rel_start, rel_end in _iter_graphemes(span):
         if grapheme.isspace():

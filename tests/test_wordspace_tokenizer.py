@@ -116,3 +116,17 @@ def test_wordspace_offsets_stable_for_multiscript_text() -> None:
     assert payload.token_text == ["abc", "ไ", "ท", "ย", "日", "本", "語"]
     assert payload.token_offsets == [(0, 3), (3, 4), (4, 5), (5, 6), (7, 8), (8, 9), (9, 10)]
     assert [text[s:e] for s, e in payload.token_offsets] == payload.token_text
+
+
+def test_wordspace_offsets_stable_for_really_mixed_no_space_scripts() -> None:
+    base = _baseline_tokenizer()
+    base.fit_vocab(["alphabeticalไทย日本"], min_freq=1)
+    base.config.feature_flags = FeatureFlags(enable_wordspace=True, enable_ipa_channel=False)
+    ws = WordSpaceTokenizer(tokenizer=base)
+
+    text = "alphabeticalไทย日本"
+    payload = ws.encode(text, language="pt")
+
+    assert isinstance(payload, WordSpacePayload)
+    assert payload.token_text == ["alphabetical", "ไ", "ท", "ย", "日", "本"]
+    assert [text[s:e] for s, e in payload.token_offsets] == payload.token_text
