@@ -1,4 +1,4 @@
-from noetic_pawp import PAWPTokenizer
+from noetic_pawp import PAWPTokenizer, TokenizerMode
 from noetic_pawp.feature_flags import FeatureFlags
 from noetic_pawp.wordspace_tokenizer import WordSpacePayload, WordSpaceTokenizer
 
@@ -71,3 +71,33 @@ def test_wordspace_ipa_ids_are_deterministic_across_instances() -> None:
     assert isinstance(payload_a, WordSpacePayload)
     assert isinstance(payload_b, WordSpacePayload)
     assert payload_a.token_ipa_ids == payload_b.token_ipa_ids
+
+
+def test_noetic_tokenizer_modes_contract() -> None:
+    base = _baseline_tokenizer()
+
+    text_tokens = base.encode("pronúncia", language="pt", mode=TokenizerMode.TEXT)
+    audio_tokens = base.encode("pronúncia", language="pt", mode=TokenizerMode.AUDIO)
+    multimodal_tokens = base.encode("pronúncia", language="pt", mode=TokenizerMode.MULTIMODAL)
+
+    assert text_tokens and audio_tokens and multimodal_tokens
+    assert all(not item.ipa_sequence and item.ipa_units == [] for item in text_tokens)
+    assert any(item.ipa_sequence for item in audio_tokens)
+    assert any(item.ipa_sequence for item in multimodal_tokens)
+
+
+def test_mode_text_skips_cn_attachment() -> None:
+    base = _baseline_tokenizer()
+    out = base.encode("pronúncia", language="pt", mode=TokenizerMode.TEXT, attach_cn=True)
+    assert out
+    assert all(item.cn is None for item in out)
+
+
+def test_invalid_mode_raises_for_noetic_tokenizer() -> None:
+    base = _baseline_tokenizer()
+    try:
+        base.encode("pronúncia", language="pt", mode="invalid")
+    except ValueError as exc:
+        assert "Invalid tokenizer mode" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid mode")
